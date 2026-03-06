@@ -15,9 +15,8 @@ import { DiffModal } from '@/components/config/DiffModal';
 import { useVisualConfig } from '@/hooks/useVisualConfig';
 import { useNotificationStore, useAuthStore, useThemeStore } from '@/stores';
 import { configFileApi } from '@/services/api/configFile';
+import { buildConfigYamlForSave, type ConfigEditorTab } from './configSave';
 import styles from './ConfigPage.module.scss';
-
-type ConfigEditorTab = 'visual' | 'source';
 
 function readCommercialModeFromYaml(yamlContent: string): boolean {
   try {
@@ -123,7 +122,11 @@ export function ConfigPage() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const nextMergedYaml = applyVisualChangesToYaml(content);
+      const nextMergedYaml = buildConfigYamlForSave({
+        activeTab,
+        content,
+        applyVisualChangesToYaml,
+      });
       const latestServerYaml = await configFileApi.fetchConfigYaml();
 
       if (latestServerYaml === nextMergedYaml) {
