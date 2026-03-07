@@ -13,7 +13,6 @@ export type CodexCleanupEvent =
   | { type: 'start'; total: number }
   | { type: 'progress'; index: number; total: number; name: string; auth_index: string; status_code?: number; deleted?: boolean; error?: string }
   | { type: 'done'; total: number; deleted: number };
-
 export const AUTH_FILE_INVALID_JSON_OBJECT_ERROR = 'AUTH_FILE_INVALID_JSON_OBJECT';
 
 const getStatusCode = (err: unknown): number | undefined => {
@@ -137,8 +136,18 @@ const OAUTH_MODEL_ALIAS_ENDPOINT = '/oauth-model-alias';
 export const authFilesApi = {
   list: () => apiClient.get<AuthFilesResponse>('/auth-files'),
 
-  setStatus: (name: string, disabled: boolean) =>
-    apiClient.patch<AuthFileStatusResponse>('/auth-files/status', { name, disabled }),
+  async setStatus(name: string, disabled: boolean): Promise<AuthFileStatusResponse> {
+    const json = await authFilesApi.downloadJsonObject(name);
+
+    if (disabled) {
+      json.disabled = true;
+    } else {
+      delete json.disabled;
+    }
+
+    await authFilesApi.saveJsonObject(name, json);
+    return { status: disabled ? 'disabled' : 'enabled', disabled };
+  },
 
   upload: (file: File) => {
     const formData = new FormData();
