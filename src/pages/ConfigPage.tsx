@@ -5,7 +5,7 @@ import CodeMirror, { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { yaml } from '@codemirror/lang-yaml';
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { keymap } from '@codemirror/view';
-import { parse as parseYaml } from 'yaml';
+import { parse as parseYaml, parseDocument } from 'yaml';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -15,7 +15,7 @@ import { DiffModal } from '@/components/config/DiffModal';
 import { useVisualConfig } from '@/hooks/useVisualConfig';
 import { useNotificationStore, useAuthStore, useThemeStore } from '@/stores';
 import { configFileApi } from '@/services/api/configFile';
-import { buildConfigYamlForSave, type ConfigEditorTab } from './configSave';
+import { type ConfigEditorTab } from './configSave';
 import styles from './ConfigPage.module.scss';
 
 function readCommercialModeFromYaml(yamlContent: string): boolean {
@@ -140,14 +140,37 @@ export function ConfigPage() {
 
     setSaving(true);
     try {
-      const nextMergedYaml = buildConfigYamlForSave({
-        activeTab,
-        content,
-        applyVisualChangesToYaml,
-      });
       const latestServerYaml = await configFileApi.fetchConfigYaml();
 
-      if (latestServerYaml === nextMergedYaml) {
+      if (activeTab !== 'source') {
+        const latestDocument = parseDocument(latestServerYaml);
+        if (latestDocument.errors.length > 0) {
+          showNotification(
+            t('config_management.visual_mode_latest_yaml_invalid', {
+              message: latestDocument.errors[0]?.message ?? t('config_management.visual_mode_save_blocked')
+            }),
+            'error'
+          );
+          return;
+        }
+      }
+
+      // In source mode, save exactly what the user edited. In visual mode, materialize visual changes into the latest YAML.
+      const nextMergedYaml =
+        activeTab === 'source' ? content : applyVisualChangesToYaml(latestServerYaml);
+
+      // In visual mode, applyVisualChangesToYaml re-serializes YAML via parseDocument → toString,
+      // which may reformat comments/whitespace. Normalize the server YAML through the same pipeline
+      // so the diff only shows actual value changes, not cosmetic reformatting.
+      let diffOriginal = latestServerYaml;
+      if (activeTab !== 'source') {
+        try {
+          const doc = parseDocument(latestServerYaml);
+          diffOriginal = doc.toString({ indent: 2, lineWidth: 120, minContentWidth: 0 });
+        } catch { /* keep raw on parse failure */ }
+      }
+
+      if (diffOriginal === nextMergedYaml) {
         setDirty(false);
         setContent(latestServerYaml);
         setServerYaml(latestServerYaml);
