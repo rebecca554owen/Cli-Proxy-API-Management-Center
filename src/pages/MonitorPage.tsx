@@ -64,6 +64,7 @@ export function MonitorPage() {
   const [providerMap, setProviderMap] = useState<Record<string, string>>({});
   const [providerModels, setProviderModels] = useState<Record<string, Set<string>>>({});
   const [providerTypeMap, setProviderTypeMap] = useState<Record<string, string>>({});
+  const [authIndexMap, setAuthIndexMap] = useState<Record<string, string>>({});
 
   // 加载渠道名称映射（支持所有提供商类型）
   const loadProviderMap = useCallback(async () => {
@@ -184,6 +185,7 @@ export function MonitorPage() {
         iflow: 'iFlow',
       };
       const authFiles = authFilesRes?.files || [];
+      const authIdxMap: Record<string, string> = {};
       authFiles.forEach((file) => {
         const name = file.name;
         if (!name) return;
@@ -191,11 +193,20 @@ export function MonitorPage() {
         const providerName = authTypeToProvider[fileType] || fileType;
         map[name] = providerName;
         typeMap[name] = providerName;
+        // auth_index → 文件名映射（供 RequestLogs 使用）
+        const rawAuthIndex = (file as Record<string, unknown>)['auth_index'] ?? file.authIndex;
+        if (rawAuthIndex !== undefined && rawAuthIndex !== null) {
+          const authIndexKey = String(rawAuthIndex).trim();
+          if (authIndexKey) {
+            authIdxMap[authIndexKey] = name;
+          }
+        }
       });
 
       setProviderMap(map);
       setProviderModels(modelsMap);
       setProviderTypeMap(typeMap);
+      setAuthIndexMap(authIdxMap);
     } catch (err) {
       console.warn('Monitor: Failed to load provider map:', err);
     }
@@ -336,6 +347,7 @@ export function MonitorPage() {
         providerMap={providerMap}
         providerTypeMap={providerTypeMap}
         apiFilter={apiFilter}
+        authIndexMap={authIndexMap}
       />
     </div>
   );

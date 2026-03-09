@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Card } from '@/components/ui/Card';
-import { monitorApi, type MonitorRequestLogItem, authFilesApi } from '@/services/api';
+import { monitorApi, type MonitorRequestLogItem } from '@/services/api';
 import { useDisableModel } from '@/hooks';
 import { TimeRangeSelector, formatTimeRangeCaption, type TimeRange } from './TimeRangeSelector';
 import { DisableModelModal } from './DisableModelModal';
@@ -25,6 +25,7 @@ interface RequestLogsProps {
   providerMap: Record<string, string>;
   providerTypeMap: Record<string, string>;
   apiFilter: string;
+  authIndexMap: Record<string, string>;
 }
 
 interface LogEntry {
@@ -55,6 +56,7 @@ export function RequestLogs({
   providerMap,
   providerTypeMap,
   apiFilter,
+  authIndexMap,
 }: RequestLogsProps) {
   const { t } = useTranslation();
   const [filterApi, setFilterApi] = useState('');
@@ -88,9 +90,6 @@ export function RequestLogs({
     models: [],
     sources: [],
   });
-
-  // 认证文件索引到名称的映射
-  const [authIndexMap, setAuthIndexMap] = useState<Record<string, string>>({});
 
   // 使用禁用模型 Hook
   const {
@@ -146,33 +145,6 @@ export function RequestLogs({
     },
     [providerMap, providerTypeMap]
   );
-
-  // 加载认证文件映射（authIndex -> 文件名）
-  const loadAuthIndexMap = useCallback(async () => {
-    try {
-      const response = await authFilesApi.list();
-      const files = response?.files || [];
-      const map: Record<string, string> = {};
-      files.forEach((file) => {
-        // 兼容 auth_index 和 authIndex 两种字段名（API 返回的是 auth_index）
-        const rawAuthIndex = (file as Record<string, unknown>)['auth_index'] ?? file.authIndex;
-        if (rawAuthIndex !== undefined && rawAuthIndex !== null) {
-          const authIndexKey = String(rawAuthIndex).trim();
-          if (authIndexKey) {
-            map[authIndexKey] = file.name;
-          }
-        }
-      });
-      setAuthIndexMap(map);
-    } catch (err) {
-      console.warn('Failed to load auth files for index mapping:', err);
-    }
-  }, []);
-
-  // 初始加载认证文件映射
-  useEffect(() => {
-    loadAuthIndexMap();
-  }, [loadAuthIndexMap]);
 
   // 独立获取日志数据
   const fetchLogData = useCallback(async () => {
