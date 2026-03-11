@@ -3,9 +3,12 @@ import assert from 'node:assert/strict';
 import type { ProviderKeyConfig } from '../src/types/provider.ts';
 import {
   applyClaudeSharedFields,
+  buildClaudeConfigsFromForm,
+  canSyncClaudeConfigGroup,
   buildClaudeCopyFormState,
   buildClaudeFormState,
   hasClaudeSharedFieldChanges,
+  normalizeClaudeApiKeys,
   normalizeClaudeSyncBaseUrl,
 } from '../src/pages/claudeConfigUtils.ts';
 
@@ -29,6 +32,7 @@ test('复制 Claude 配置时保留共享字段并清空 apiKey', () => {
   const copied = buildClaudeCopyFormState(source);
 
   assert.equal(copied.apiKey, '');
+  assert.deepEqual(copied.apiKeys, ['']);
   assert.equal(copied.baseUrl, 'https://example.com');
   assert.equal(copied.prefix, 'team-a');
   assert.equal(copied.proxyUrl, 'socks5://127.0.0.1:1080');
@@ -116,4 +120,53 @@ test('同步匹配使用标准化后的 Claude baseUrl', () => {
   assert.equal(normalizeClaudeSyncBaseUrl('https://example.com/'), 'https://example.com');
   assert.equal(normalizeClaudeSyncBaseUrl('example.com'), 'http://example.com');
   assert.equal(normalizeClaudeSyncBaseUrl(''), '');
+});
+
+test('同步匹配要求 baseUrl 相同且 prefix 相同或都为空', () => {
+  assert.equal(
+    canSyncClaudeConfigGroup(
+      { baseUrl: 'https://example.com/', prefix: 'team-a' },
+      { baseUrl: 'https://example.com', prefix: 'team-a' }
+    ),
+    true
+  );
+  assert.equal(
+    canSyncClaudeConfigGroup(
+      { baseUrl: 'https://example.com/', prefix: '' },
+      { baseUrl: 'https://example.com', prefix: undefined }
+    ),
+    true
+  );
+  assert.equal(
+    canSyncClaudeConfigGroup(
+      { baseUrl: 'https://example.com/', prefix: 'team-a' },
+      { baseUrl: 'https://example.com', prefix: 'team-b' }
+    ),
+    false
+  );
+});
+
+test('批量 key 按输入顺序展开为 Claude 配置', () => {
+  const form = {
+    ...buildClaudeFormState({
+      apiKey: 'sk-source',
+      baseUrl: 'https://example.com',
+      models: [{ name: 'claude-sonnet-4-5', alias: 'sonnet' }],
+    }),
+    apiKeys: ['sk-1', 'sk-2', 'sk-3'],
+  };
+
+  const configs = buildClaudeConfigsFromForm(form);
+
+  assert.deepEqual(
+    configs.map((item) => item.apiKey),
+    ['sk-1', 'sk-2', 'sk-3']
+  );
+  assert.equal(configs[1].baseUrl, 'https://example.com');
+  assert.deepEqual(configs[2].models, [{ name: 'claude-sonnet-4-5', alias: 'sonnet' }]);
+});
+
+test('批量 key 会去重并忽略空白', () => {
+  assert.deepEqual(normalizeClaudeApiKeys([' sk-1 ', '', 'sk-2', 'sk-1'], ''), ['sk-1', 'sk-2']);
+  assert.deepEqual(normalizeClaudeApiKeys([], 'sk-fallback'), ['sk-fallback']);
 });

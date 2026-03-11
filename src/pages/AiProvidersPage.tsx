@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   AmpcodeSection,
   ClaudeSection,
@@ -24,6 +24,7 @@ import styles from './AiProvidersPage.module.scss';
 export function AiProvidersPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const { showNotification, showConfirmation } = useNotificationStore();
   const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
@@ -130,6 +131,15 @@ export function AiProvidersPage() {
     config?.openaiCompatibility,
   ]);
 
+  useEffect(() => {
+    const state = location.state as { updatedClaudeConfigs?: ProviderKeyConfig[] } | null;
+    if (!state?.updatedClaudeConfigs) return;
+    setClaudeConfigs(state.updatedClaudeConfigs);
+    updateConfigValue('claude-api-key', state.updatedClaudeConfigs);
+    clearCache('claude-api-key');
+    navigate(location.pathname, { replace: true, state: null });
+  }, [clearCache, location.pathname, location.state, navigate, updateConfigValue]);
+
   useHeaderRefresh(refreshKeyStats);
 
   const openEditor = useCallback(
@@ -147,10 +157,26 @@ export function AiProvidersPage() {
         state: {
           fromAiProviders: true,
           copySource: entry,
+          copyIndex: index,
         },
       });
     },
     [claudeConfigs, navigate]
+  );
+
+  const duplicateOpenAIProvider = useCallback(
+    (index: number) => {
+      const entry = openaiProviders[index];
+      if (!entry) return;
+      navigate('/ai-providers/openai/new', {
+        state: {
+          fromAiProviders: true,
+          copySource: entry,
+          copyIndex: index,
+        },
+      });
+    },
+    [navigate, openaiProviders]
   );
 
   const deleteGemini = async (index: number) => {
@@ -438,6 +464,7 @@ export function AiProvidersPage() {
             isSwitching={isSwitching}
             resolvedTheme={resolvedTheme}
             onAdd={() => openEditor('/ai-providers/openai/new')}
+            onDuplicate={duplicateOpenAIProvider}
             onEdit={(index) => openEditor(`/ai-providers/openai/${index}`)}
             onDelete={deleteOpenai}
           />

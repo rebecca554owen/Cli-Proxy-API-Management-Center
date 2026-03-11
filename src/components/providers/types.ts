@@ -35,6 +35,7 @@ export type ProviderFormState = Omit<ProviderKeyConfig, 'headers'> & {
   headers: HeaderEntry[];
   modelEntries: ModelEntry[];
   excludedText: string;
+  apiKeys?: string[];
 };
 
 export type VertexFormState = Omit<ProviderKeyConfig, 'headers' | 'excludedModels'> & {

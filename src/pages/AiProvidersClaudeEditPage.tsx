@@ -90,6 +90,14 @@ export function AiProvidersClaudeEditPage() {
 
   const canSave =
     !disableControls && !loading && !saving && !invalidIndexParam && !invalidIndex && !isTesting;
+  const keyList = useMemo(
+    () => (form.apiKeys && form.apiKeys.length ? form.apiKeys : [form.apiKey ?? '']),
+    [form.apiKey, form.apiKeys]
+  );
+  const resolvedTestApiKey = useMemo(
+    () => keyList.map((value) => value.trim()).find(Boolean) ?? '',
+    [keyList]
+  );
 
   const modelSelectOptions = useMemo(() => {
     const seen = new Set<string>();
@@ -131,13 +139,13 @@ export function AiProvidersClaudeEditPage() {
       .map((entry) => `${entry.name.trim()}:${entry.alias.trim()}`)
       .join('|');
     return [
-      form.apiKey.trim(),
+      keyList.map((value) => value.trim()).join('|'),
       form.baseUrl?.trim() ?? '',
       testModel.trim(),
       headersSignature,
       modelsSignature,
     ].join('||');
-  }, [form.apiKey, form.baseUrl, form.headers, form.modelEntries, testModel]);
+  }, [form.baseUrl, form.headers, form.modelEntries, keyList, testModel]);
 
   const previousConnectivityConfigRef = useRef(connectivityConfigSignature);
 
@@ -167,7 +175,7 @@ export function AiProvidersClaudeEditPage() {
     }
 
     const customHeaders = buildHeaderObject(form.headers);
-    const apiKey = form.apiKey.trim();
+    const apiKey = resolvedTestApiKey;
     const hasApiKeyHeader = hasHeader(customHeaders, 'x-api-key');
     const apiKeyFromAuthorization = resolveBearerTokenFromAuthorization(customHeaders);
     const resolvedApiKey = apiKey || apiKeyFromAuthorization;
@@ -253,10 +261,10 @@ export function AiProvidersClaudeEditPage() {
     }
   }, [
     availableModels,
-    form.apiKey,
     form.baseUrl,
     form.headers,
     isTesting,
+    resolvedTestApiKey,
     setTestMessage,
     setTestStatus,
     showNotification,
@@ -303,12 +311,108 @@ export function AiProvidersClaudeEditPage() {
           <div className={styles.sectionHint}>{t('common.invalid_provider_index')}</div>
         ) : (
           <div className={styles.openaiEditForm}>
-            <Input
-              label={t('ai_providers.claude_add_modal_key_label')}
-              value={form.apiKey}
-              onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
-              disabled={saving || disableControls || isTesting}
-            />
+            <div className={styles.keyEntriesSection}>
+              <div className={styles.keyEntriesHeader}>
+                <label className={styles.keyEntriesTitle}>
+                  {t('ai_providers.claude_add_modal_key_label')}
+                </label>
+                <span className={styles.keyEntriesHint}>
+                  {t('ai_providers.openai_keys_hint', {
+                    defaultValue: '回车自动新增一行，支持一次粘贴多行密钥。',
+                  })}
+                </span>
+              </div>
+              <div className={styles.keyEntriesList}>
+                <div className={styles.keyEntriesToolbar}>
+                  <span className={styles.keyEntriesCount}>
+                    {t('ai_providers.openai_keys_count', { defaultValue: '密钥数量' })}: {keyList.length}
+                  </span>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() =>
+                      setForm((prev) => ({
+                        ...prev,
+                        apiKeys: [...(prev.apiKeys && prev.apiKeys.length ? prev.apiKeys : ['']), ''],
+                      }))
+                    }
+                    disabled={saving || disableControls || isTesting}
+                    className={styles.addKeyButton}
+                  >
+                    {t('ai_providers.openai_keys_add_btn', { defaultValue: '添加密钥' })}
+                  </Button>
+                </div>
+                <div className={styles.keyTableShell}>
+                  <div className={styles.keyTableHeader}>
+                    <div className={styles.keyTableColIndex}>#</div>
+                    <div className={styles.keyTableColKey}>{t('common.api_key')}</div>
+                    <div className={styles.keyTableColAction}>{t('common.action')}</div>
+                  </div>
+                  {keyList.map((keyValue, index) => (
+                    <div key={index} className={styles.keyTableRow} style={{ gridTemplateColumns: '46px minmax(320px, 1fr) 120px' }}>
+                      <div className={styles.keyTableColIndex}>{index + 1}</div>
+                      <div className={styles.keyTableColKey}>
+                        <input
+                          type="text"
+                          value={keyValue}
+                          onChange={(e) =>
+                            setForm((prev) => {
+                              const next = [...(prev.apiKeys && prev.apiKeys.length ? prev.apiKeys : [''])];
+                              next[index] = e.target.value;
+                              return { ...prev, apiKey: index === 0 ? e.target.value : prev.apiKey, apiKeys: next };
+                            })
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key !== 'Enter') return;
+                            e.preventDefault();
+                            setForm((prev) => {
+                              const next = [...(prev.apiKeys && prev.apiKeys.length ? prev.apiKeys : [''])];
+                              next.splice(index + 1, 0, '');
+                              return { ...prev, apiKeys: next };
+                            });
+                          }}
+                          onPaste={(e) => {
+                            const pasted = e.clipboardData.getData('text');
+                            if (!/[\r\n]+/.test(pasted)) return;
+                            e.preventDefault();
+                            const values = pasted
+                              .split(/\r?\n+/)
+                              .map((value) => value.trim())
+                              .filter(Boolean);
+                            if (!values.length) return;
+                            setForm((prev) => {
+                              const next = [...(prev.apiKeys && prev.apiKeys.length ? prev.apiKeys : [''])];
+                              next.splice(index, 1, ...values);
+                              return { ...prev, apiKey: next[0] ?? '', apiKeys: next };
+                            });
+                          }}
+                          disabled={saving || disableControls || isTesting}
+                          className={`input ${styles.keyTableInput}`}
+                          placeholder={t('ai_providers.claude_add_modal_key_placeholder')}
+                        />
+                      </div>
+                      <div className={styles.keyTableColAction}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            setForm((prev) => {
+                              const current = prev.apiKeys && prev.apiKeys.length ? prev.apiKeys : [''];
+                              const next = current.filter((_, currentIndex) => currentIndex !== index);
+                              const normalized = next.length ? next : [''];
+                              return { ...prev, apiKey: normalized[0] ?? '', apiKeys: normalized };
+                            })
+                          }
+                          disabled={saving || disableControls || isTesting || keyList.length <= 1}
+                        >
+                          {t('common.delete')}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
             <Input
               label={t('ai_providers.priority_label')}
               hint={t('ai_providers.priority_hint')}

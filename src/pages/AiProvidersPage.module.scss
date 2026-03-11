@@ -108,6 +108,229 @@
   }
 }
 
+.providerTableList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $spacing-md;
+}
+
+.providerTableRow {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.85fr) minmax(340px, 1.4fr) 240px;
+  grid-template-rows: auto auto;
+  gap: $spacing-md;
+  align-items: center;
+  padding: 12px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-primary);
+}
+
+.providerTableHeader {
+  display: none;
+}
+
+.providerTableHeaderCell {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.providerTableCell {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.providerTableActions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  justify-items: center;
+  align-content: end;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  grid-column: 3;
+  grid-row: 2;
+  overflow: hidden;
+}
+
+.providerTableActions > span {
+  width: 100%;
+  min-width: 0;
+}
+
+.providerTableMeta {
+  display: contents;
+}
+
+.providerMainCell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  justify-content: center;
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+
+.providerMainTitle {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 14px;
+  text-align: left;
+  line-height: 1.25;
+}
+
+.providerMetaLine {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.providerMetaInline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.providerPriorityBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.providerMetaKey {
+  font-family: 'Monaco', 'Menlo', 'Consolas', 'Ubuntu Mono', monospace;
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.providerModelCell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  justify-content: center;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.providerModelList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.providerModelItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.providerModelSource,
+.providerModelTarget {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.providerModelSource {
+  text-align: right;
+}
+
+.providerModelTarget {
+  text-align: left;
+}
+
+.providerModelArrow {
+  color: var(--text-tertiary);
+}
+
+.providerModelMuted {
+  color: var(--text-tertiary);
+}
+
+.providerStatusCell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
+  grid-column: 3;
+  grid-row: 1;
+
+  .statusBar {
+    justify-content: center;
+    margin-top: 0;
+    padding-top: 0;
+    max-width: 240px;
+  }
+}
+
+.providerStatusStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+
+.providerActionButton {
+  min-width: 0;
+  width: 100%;
+  min-height: 32px;
+  justify-content: center;
+  font-size: 12px;
+  max-width: 100%;
+  padding-left: 8px;
+  padding-right: 8px;
+  overflow: hidden;
+}
+
+@include mobile {
+  .providerTableList {
+    grid-template-columns: 1fr;
+  }
+
+  .providerTableRow {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+  }
+
+  .providerTableActions {
+    grid-template-columns: repeat(2, minmax(60px, 1fr));
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .providerMainCell,
+  .providerModelCell,
+  .providerStatusCell {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .providerModelItem {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
 // 成功失败次数统计样式
 .cardStats {
   display: flex;
@@ -121,9 +344,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 5px 10px;
   border-radius: 999px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1.1;
   border: 1px solid transparent;
@@ -167,6 +390,78 @@
   font-weight: 600;
   word-break: break-all;
   font-family: 'Monaco', 'Menlo', 'Consolas', 'Ubuntu Mono', monospace;
+}
+
+.providerCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.providerCardIdentity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.providerPrimaryValue {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.providerKeyValue {
+  font-family: 'Monaco', 'Menlo', 'Consolas', 'Ubuntu Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.providerCardStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.providerSummaryRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.providerSummaryChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg-quinary, #f8f9fa);
+  border: 1px solid var(--border-secondary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+
+  strong {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+}
+
+.providerModelsSection {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 // 自定义请求头徽章
@@ -285,33 +580,29 @@
 .apiKeyEntryList {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
+  margin-top: 0;
 }
 
 .apiKeyEntryCard {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: var(--bg-secondary, #f9fafb);
-  border: 1px solid var(--border-secondary);
-  border-radius: 8px;
+  gap: 6px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
   font-size: 12px;
+  min-width: 0;
 }
 
 .apiKeyEntryIndex {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--primary-color);
-  color: white;
+  display: inline-block;
+  color: var(--text-tertiary);
   font-size: 11px;
   font-weight: 600;
   flex-shrink: 0;
+  line-height: 1.25;
 }
 
 .apiKeyEntryKey {
@@ -319,6 +610,9 @@
   font-weight: 600;
   color: var(--text-primary);
   word-break: break-all;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.25;
 }
 
 .apiKeyEntryProxy {
@@ -335,6 +629,7 @@
   display: flex;
   gap: 6px;
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 .apiKeyEntryStat {
@@ -1016,15 +1311,6 @@
 
   .excludedModelsLabel {
     color: var(--warning-color);
-  }
-
-  .apiKeyEntryCard {
-    background: var(--bg-tertiary);
-    border-color: var(--border-primary);
-  }
-
-  .apiKeyEntryIndex {
-    background: var(--primary-color);
   }
 
   .statusBlockIdle {

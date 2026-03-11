@@ -2,7 +2,6 @@ import { Fragment } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import iconClaude from '@/assets/icons/claude.svg';
 import type { ProviderKeyConfig } from '@/types';
 import { maskApiKey } from '@/utils/format';
@@ -47,6 +46,11 @@ export function ClaudeSection({
   const { t } = useTranslation();
   const actionsDisabled = disableControls || loading || isSwitching;
   const toggleDisabled = disableControls || loading || isSwitching;
+  const resolveCloakModeLabel = (item: ProviderKeyConfig) => {
+    const raw = (item.cloak?.mode ?? '').trim().toLowerCase();
+    const key = raw === 'always' || raw === 'never' ? raw : 'auto';
+    return t(`ai_providers.claude_cloak_mode_${key}`);
+  };
 
   return (
     <>
@@ -67,6 +71,19 @@ export function ClaudeSection({
           items={configs}
           loading={loading}
           keyField={(item) => item.apiKey}
+          listClassName={styles.providerTableList}
+          rowClassName={styles.providerTableRow}
+          metaClassName={styles.providerTableMeta}
+          actionsClassName={styles.providerTableActions}
+          actionButtonClassName={styles.providerActionButton}
+          header={
+            <div className={styles.providerTableHeader}>
+              <div className={styles.providerTableHeaderCell}>渠道与接口</div>
+              <div className={styles.providerTableHeaderCell}>模型别名--&gt;实际模型</div>
+              <div className={styles.providerTableHeaderCell}>{t('common.status')}</div>
+              <div className={styles.providerTableHeaderCell}>操作</div>
+            </div>
+          }
           emptyTitle={t('ai_providers.claude_empty_title')}
           emptyDescription={t('ai_providers.claude_empty_desc')}
           onEdit={onEdit}
@@ -74,12 +91,15 @@ export function ClaudeSection({
           actionsDisabled={actionsDisabled}
           getRowDisabled={(item) => hasDisableAllModelsRule(item.excludedModels)}
           renderExtraActions={(item, index) => (
-            <ToggleSwitch
-              label={t('ai_providers.config_toggle_label')}
-              checked={!hasDisableAllModelsRule(item.excludedModels)}
+            <Button
+              variant="secondary"
+              size="sm"
+              className={styles.providerActionButton}
               disabled={toggleDisabled}
-              onChange={(value) => void onToggle(index, value)}
-            />
+              onClick={() => void onToggle(index, hasDisableAllModelsRule(item.excludedModels))}
+            >
+              {hasDisableAllModelsRule(item.excludedModels) ? '启用' : '禁用'}
+            </Button>
           )}
           deleteLabel={t('common.delete')}
           extraActionButtons={(_, index) => (
@@ -88,6 +108,7 @@ export function ClaudeSection({
               size="sm"
               onClick={() => onDuplicate(index)}
               disabled={actionsDisabled}
+              className={styles.providerActionButton}
             >
               {t('common.copy')}
             </Button>
@@ -95,6 +116,8 @@ export function ClaudeSection({
           renderContent={(item) => {
             const stats = getStatsBySource(item.apiKey, keyStats, item.prefix);
             const headerEntries = Object.entries(item.headers || {});
+            const userAgent = headerEntries.find(([key]) => key.toLowerCase() === 'user-agent')?.[1];
+            const extraHeaders = headerEntries.filter(([key]) => key.toLowerCase() !== 'user-agent');
             const configDisabled = hasDisableAllModelsRule(item.excludedModels);
             const excludedModels = item.excludedModels ?? [];
             const statusData = lookupStatusBar(
@@ -104,113 +127,76 @@ export function ClaudeSection({
 
             return (
               <Fragment>
-                <div className="item-title">{t('ai_providers.claude_item_title')}</div>
-                <div className={styles.fieldRow}>
-                  <span className={styles.fieldLabel}>{t('common.api_key')}:</span>
-                  <span className={styles.fieldValue}>{maskApiKey(item.apiKey)}</span>
-                </div>
-                {item.priority !== undefined && (
-                  <div className={styles.fieldRow}>
-                    <span className={styles.fieldLabel}>{t('common.priority')}:</span>
-                    <span className={styles.fieldValue}>{item.priority}</span>
+                <div className={`${styles.providerTableCell} ${styles.providerMainCell}`}>
+                  <div className={styles.providerMainTitle}>{t('ai_providers.claude_item_title')}</div>
+                  <div className={`${styles.providerMetaLine} ${styles.providerMetaInline}`}>
+                    <span>{t('common.priority')}:</span>
+                    <span className={styles.providerPriorityBadge}>{item.priority ?? 0}</span>
                   </div>
-                )}
-                {item.prefix && (
-                  <div className={styles.fieldRow}>
-                    <span className={styles.fieldLabel}>{t('common.prefix')}:</span>
-                    <span className={styles.fieldValue}>{item.prefix}</span>
+                  {item.baseUrl && <div className={styles.providerMetaLine}>{item.baseUrl}</div>}
+                  <div className={`${styles.providerMetaLine} ${styles.providerMetaKey}`}>
+                    {maskApiKey(item.apiKey)}
                   </div>
-                )}
-                {item.baseUrl && (
-                  <div className={styles.fieldRow}>
-                    <span className={styles.fieldLabel}>{t('common.base_url')}:</span>
-                    <span className={styles.fieldValue}>{item.baseUrl}</span>
-                  </div>
-                )}
-                {item.proxyUrl && (
-                  <div className={styles.fieldRow}>
-                    <span className={styles.fieldLabel}>{t('common.proxy_url')}:</span>
-                    <span className={styles.fieldValue}>{item.proxyUrl}</span>
-                  </div>
-                )}
-                {item.cloak && (
-                  <div className={styles.fieldRow}>
-                    <span className={styles.fieldLabel}>{t('ai_providers.claude_cloak_mode_label')}:</span>
-                    <span className={styles.fieldValue}>
-                      {(() => {
-                        const raw = (item.cloak?.mode ?? '').trim().toLowerCase();
-                        const key = raw === 'always' || raw === 'never' ? raw : 'auto';
-                        return t(`ai_providers.claude_cloak_mode_${key}`);
-                      })()}
-                    </span>
-                  </div>
-                )}
-                {item.cloak?.strictMode ? (
-                  <div className={styles.fieldRow}>
-                    <span className={styles.fieldLabel}>{t('ai_providers.claude_cloak_strict_label')}:</span>
-                    <span className={styles.fieldValue}>{t('common.yes')}</span>
-                  </div>
-                ) : null}
-                {item.cloak?.sensitiveWords?.length ? (
-                  <div className={styles.fieldRow}>
-                    <span className={styles.fieldLabel}>
-                      {t('ai_providers.claude_cloak_sensitive_words_count')}:
-                    </span>
-                    <span className={styles.fieldValue}>{item.cloak.sensitiveWords.length}</span>
-                  </div>
-                ) : null}
-                {headerEntries.length > 0 && (
-                  <div className={styles.headerBadgeList}>
-                    {headerEntries.map(([key, value]) => (
-                      <span key={key} className={styles.headerBadge}>
-                        <strong>{key}:</strong> {value}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {configDisabled && (
-                  <div className="status-badge warning" style={{ marginTop: 8, marginBottom: 0 }}>
-                    {t('ai_providers.config_disabled_badge')}
-                  </div>
-                )}
-                {item.models?.length ? (
-                  <div className={styles.modelTagList}>
-                    <span className={styles.modelCountLabel}>
-                      {t('ai_providers.claude_models_count')}: {item.models.length}
-                    </span>
-                    {item.models.map((model) => (
-                      <span key={model.name} className={styles.modelTag}>
-                        <span className={styles.modelName}>{model.name}</span>
-                        {model.alias && model.alias !== model.name && (
-                          <span className={styles.modelAlias}>{model.alias}</span>
-                        )}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-                {excludedModels.length ? (
-                  <div className={styles.excludedModelsSection}>
-                    <div className={styles.excludedModelsLabel}>
-                      {t('ai_providers.excluded_models_count', { count: excludedModels.length })}
+                  {item.prefix && (
+                    <div className={styles.providerMetaLine}>
+                      {t('common.prefix')}: {item.prefix}
                     </div>
-                    <div className={styles.modelTagList}>
-                      {excludedModels.map((model) => (
-                        <span key={model} className={`${styles.modelTag} ${styles.excludedModelTag}`}>
-                          <span className={styles.modelName}>{model}</span>
+                  )}
+                  {item.proxyUrl && (
+                    <div className={styles.providerMetaLine}>
+                      {t('common.proxy_url')}: {item.proxyUrl}
+                    </div>
+                  )}
+                  {item.cloak && (
+                    <div className={styles.providerMetaLine}>
+                      模式: {resolveCloakModeLabel(item)}
+                    </div>
+                  )}
+                  {userAgent && <div className={styles.providerMetaLine}>UA: {userAgent}</div>}
+                  {extraHeaders.length > 0 && (
+                    <div className={styles.headerBadgeList}>
+                      {extraHeaders.map(([key, value]) => (
+                        <span key={key} className={styles.headerBadge}>
+                          <strong>{key}:</strong> {value}
                         </span>
                       ))}
                     </div>
-                  </div>
-                ) : null}
-                <div className={styles.cardStats}>
-                  <span className={`${styles.statPill} ${styles.statSuccess}`}>
-                    {t('stats.success')}: {stats.success}
-                  </span>
-                  <span className={`${styles.statPill} ${styles.statFailure}`}>
-                    {t('stats.failure')}: {stats.failure}
-                  </span>
+                  )}
+                  {configDisabled && (
+                    <div className="status-badge warning" style={{ marginTop: 0, marginBottom: 0 }}>
+                      {t('ai_providers.config_disabled_badge')}
+                    </div>
+                  )}
                 </div>
-                <ProviderStatusBar statusData={statusData} />
+                <div className={`${styles.providerTableCell} ${styles.providerModelCell}`}>
+                  <div className={styles.providerModelList}>
+                    {(item.models ?? []).map((model) => (
+                      <div key={model.name} className={styles.providerModelItem}>
+                        <span className={styles.providerModelSource}>{model.alias || model.name}</span>
+                        <span className={styles.providerModelArrow}>-&gt;</span>
+                        <span className={styles.providerModelTarget}>{model.name}</span>
+                      </div>
+                    ))}
+                    {excludedModels.map((model) => (
+                      <div key={model} className={`${styles.providerModelItem} ${styles.providerModelMuted}`}>
+                        <span className={styles.providerModelSource}>{model}</span>
+                        <span className={styles.providerModelArrow}>-&gt;</span>
+                        <span className={styles.providerModelTarget}>已排除</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className={`${styles.providerTableCell} ${styles.providerStatusCell}`}>
+                  <div className={styles.providerStatusStats}>
+                    <span className={`${styles.statPill} ${styles.statSuccess}`}>
+                      {t('stats.success')}: {stats.success}
+                    </span>
+                    <span className={`${styles.statPill} ${styles.statFailure}`}>
+                      {t('stats.failure')}: {stats.failure}
+                    </span>
+                  </div>
+                  <ProviderStatusBar statusData={statusData} />
+                </div>
               </Fragment>
             );
           }}
