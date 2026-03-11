@@ -25,6 +25,7 @@ interface ClaudeSectionProps {
   disableControls: boolean;
   isSwitching: boolean;
   onAdd: () => void;
+  onDuplicate: (index: number) => void;
   onEdit: (index: number) => void;
   onDelete: (index: number) => void;
   onToggle: (index: number, enabled: boolean) => void;
@@ -38,6 +39,7 @@ export function ClaudeSection({
   disableControls,
   isSwitching,
   onAdd,
+  onDuplicate,
   onEdit,
   onDelete,
   onToggle,
@@ -78,6 +80,17 @@ export function ClaudeSection({
               disabled={toggleDisabled}
               onChange={(value) => void onToggle(index, value)}
             />
+          )}
+          deleteLabel={t('common.delete')}
+          extraActionButtons={(_, index) => (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onDuplicate(index)}
+              disabled={actionsDisabled}
+            >
+              {t('common.copy')}
+            </Button>
           )}
           renderContent={(item) => {
             const stats = getStatsBySource(item.apiKey, keyStats, item.prefix);

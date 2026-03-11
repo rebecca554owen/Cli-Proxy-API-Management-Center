@@ -15,6 +15,7 @@ interface ProviderListProps<T> {
   deleteLabel?: string;
   actionsDisabled?: boolean;
   getRowDisabled?: (item: T, index: number) => boolean;
+  extraActionButtons?: (item: T, index: number) => ReactNode;
   renderExtraActions?: (item: T, index: number) => ReactNode;
 }
 
@@ -30,6 +31,7 @@ export function ProviderList<T>({
   deleteLabel,
   actionsDisabled = false,
   getRowDisabled,
+  extraActionButtons,
   renderExtraActions,
 }: ProviderListProps<T>) {
   const { t } = useTranslation();
@@ -62,6 +64,7 @@ export function ProviderList<T>({
               >
                 {t('common.edit')}
               </Button>
+              {extraActionButtons ? extraActionButtons(item, index) : null}
               <Button
                 variant="danger"
                 size="sm"

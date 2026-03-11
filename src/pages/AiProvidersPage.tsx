@@ -139,6 +139,20 @@ export function AiProvidersPage() {
     [navigate]
   );
 
+  const duplicateClaudeConfig = useCallback(
+    (index: number) => {
+      const entry = claudeConfigs[index];
+      if (!entry) return;
+      navigate('/ai-providers/claude/new', {
+        state: {
+          fromAiProviders: true,
+          copySource: entry,
+        },
+      });
+    },
+    [claudeConfigs, navigate]
+  );
+
   const deleteGemini = async (index: number) => {
     const entry = geminiKeys[index];
     if (!entry) return;
@@ -383,6 +397,7 @@ export function AiProvidersPage() {
             disableControls={disableControls}
             isSwitching={isSwitching}
             onAdd={() => openEditor('/ai-providers/claude/new')}
+            onDuplicate={duplicateClaudeConfig}
             onEdit={(index) => openEditor(`/ai-providers/claude/${index}`)}
             onDelete={(index) => void deleteProviderEntry('claude', index)}
             onToggle={(index, enabled) => void setConfigEnabled('claude', index, enabled)}

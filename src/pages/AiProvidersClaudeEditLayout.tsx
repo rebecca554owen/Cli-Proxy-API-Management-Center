@@ -8,11 +8,22 @@ import { useAuthStore, useClaudeEditDraftStore, useConfigStore, useNotificationS
 import type { ProviderKeyConfig } from '@/types';
 import type { ModelInfo } from '@/utils/models';
 import type { ModelEntry, ProviderFormState } from '@/components/providers/types';
-import { buildHeaderObject, headersToEntries, normalizeHeaderEntries } from '@/utils/headers';
-import { excludedModelsToText, parseExcludedModels } from '@/components/providers/utils';
-import { modelsToEntries } from '@/components/ui/modelInputListUtils';
+import { buildHeaderObject, normalizeHeaderEntries } from '@/utils/headers';
+import { parseExcludedModels } from '@/components/providers/utils';
 
-type LocationState = { fromAiProviders?: boolean } | null;
+import {
+  applyClaudeSharedFields,
+  buildClaudeCopyFormState,
+  buildClaudeFormState,
+  buildEmptyClaudeForm,
+  hasClaudeSharedFieldChanges,
+  normalizeClaudeSyncBaseUrl,
+} from './claudeConfigUtils';
+
+type LocationState = {
+  fromAiProviders?: boolean;
+  copySource?: ProviderKeyConfig;
+} | null;
 
 type TestStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -37,19 +48,6 @@ export type ClaudeEditOutletContext = {
   handleSave: () => Promise<void>;
   mergeDiscoveredModels: (selectedModels: ModelInfo[]) => void;
 };
-
-const buildEmptyForm = (): ProviderFormState => ({
-  apiKey: '',
-  priority: undefined,
-  prefix: '',
-  baseUrl: '',
-  proxyUrl: '',
-  headers: [],
-  models: [],
-  excludedModels: [],
-  modelEntries: [{ name: '', alias: '' }],
-  excludedText: '',
-});
 
 const parseIndexParam = (value: string | undefined) => {
   if (!value) return null;
@@ -107,7 +105,7 @@ export function AiProvidersClaudeEditLayout() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const { showNotification } = useNotificationStore();
+  const { showConfirmation, showNotification } = useNotificationStore();
 
   const params = useParams<{ index?: string }>();
   const hasIndexParam = typeof params.index === 'string';
@@ -143,7 +141,7 @@ export function AiProvidersClaudeEditLayout() {
   const setDraftTestStatus = useClaudeEditDraftStore((state) => state.setDraftTestStatus);
   const setDraftTestMessage = useClaudeEditDraftStore((state) => state.setDraftTestMessage);
 
-  const form = draft?.form ?? buildEmptyForm();
+  const form = draft?.form ?? buildEmptyClaudeForm();
   const testModel = draft?.testModel ?? '';
   const testStatus = draft?.testStatus ?? 'idle';
   const testMessage = draft?.testMessage ?? '';
@@ -234,12 +232,7 @@ export function AiProvidersClaudeEditLayout() {
     if (draft?.initialized) return;
 
     if (initialData) {
-      const seededForm: ProviderFormState = {
-        ...initialData,
-        headers: headersToEntries(initialData.headers),
-        modelEntries: modelsToEntries(initialData.models),
-        excludedText: excludedModelsToText(initialData.excludedModels),
-      };
+      const seededForm = buildClaudeFormState(initialData);
       const available = seededForm.modelEntries.map((entry) => entry.name.trim()).filter(Boolean);
       const baselineSignature = buildClaudeSignature(seededForm);
       initDraft(draftKey, {
@@ -252,7 +245,21 @@ export function AiProvidersClaudeEditLayout() {
       return;
     }
 
-    const emptyForm = buildEmptyForm();
+    const locationState = location.state as LocationState;
+    if (editIndex === null && locationState?.copySource) {
+      const copiedForm = buildClaudeCopyFormState(locationState.copySource);
+      const available = copiedForm.modelEntries.map((entry) => entry.name.trim()).filter(Boolean);
+      initDraft(draftKey, {
+        baselineSignature: buildClaudeSignature(copiedForm),
+        form: copiedForm,
+        testModel: available[0] || '',
+        testStatus: 'idle',
+        testMessage: '',
+      });
+      return;
+    }
+
+    const emptyForm = buildEmptyClaudeForm();
     initDraft(draftKey, {
       baselineSignature: buildClaudeSignature(emptyForm),
       form: emptyForm,
@@ -260,7 +267,7 @@ export function AiProvidersClaudeEditLayout() {
       testStatus: 'idle',
       testMessage: '',
     });
-  }, [draft?.initialized, draftKey, initDraft, initialData, loading]);
+  }, [draft?.initialized, draftKey, editIndex, initDraft, initialData, loading, location.state]);
 
   const resolvedLoading = !draft?.initialized;
   const currentSignature = useMemo(() => buildClaudeSignature(form), [form]);
@@ -375,9 +382,52 @@ export function AiProvidersClaudeEditLayout() {
           ? configs.map((item, idx) => (idx === editIndex ? payload : item))
           : [...configs, payload];
 
-      await providersApi.saveClaudeConfigs(nextList);
-      setConfigs(nextList);
-      updateConfigValue('claude-api-key', nextList);
+      let finalList = nextList;
+      const previousItem = editIndex !== null ? configs[editIndex] : null;
+      const previousForm = previousItem ? buildClaudeFormState(previousItem) : null;
+      const nextForm = buildClaudeFormState(payload);
+      const previousSyncBaseUrl = normalizeClaudeSyncBaseUrl(previousItem?.baseUrl);
+      const nextSyncBaseUrl = normalizeClaudeSyncBaseUrl(payload.baseUrl);
+      const canSyncSharedFields =
+        editIndex !== null &&
+        previousItem &&
+        previousForm &&
+        previousSyncBaseUrl &&
+        previousSyncBaseUrl === nextSyncBaseUrl &&
+        hasClaudeSharedFieldChanges(previousForm, nextForm) &&
+        nextList.some(
+          (item, idx) =>
+            idx !== editIndex && normalizeClaudeSyncBaseUrl(item.baseUrl) === nextSyncBaseUrl
+        );
+
+      if (canSyncSharedFields) {
+        const shouldSync = await new Promise<boolean>((resolve) => {
+          showConfirmation({
+            title: t('ai_providers.claude_sync_same_baseurl_title', {
+              defaultValue: '同步相同 Base URL 的配置',
+            }),
+            message: t('ai_providers.claude_sync_same_baseurl_message', {
+              defaultValue: '检测到共享字段已改动，是否同步到其他使用相同 Base URL 的 Claude 配置？',
+            }),
+            confirmText: t('common.confirm'),
+            cancelText: t('common.cancel'),
+            onConfirm: async () => resolve(true),
+            onCancel: () => resolve(false),
+          });
+        });
+
+        if (shouldSync) {
+          finalList = nextList.map((item, idx) => {
+            if (idx === editIndex) return item;
+            if (normalizeClaudeSyncBaseUrl(item.baseUrl) !== nextSyncBaseUrl) return item;
+            return applyClaudeSharedFields(item, payload);
+          });
+        }
+      }
+
+      await providersApi.saveClaudeConfigs(finalList);
+      setConfigs(finalList);
+      updateConfigValue('claude-api-key', finalList);
       clearCache('claude-api-key');
       showNotification(
         editIndex !== null ? t('notification.claude_config_updated') : t('notification.claude_config_added'),
@@ -405,6 +455,7 @@ export function AiProvidersClaudeEditLayout() {
     resolvedLoading,
     setDraftBaselineSignature,
     saving,
+    showConfirmation,
     showNotification,
     t,
     updateConfigValue,
