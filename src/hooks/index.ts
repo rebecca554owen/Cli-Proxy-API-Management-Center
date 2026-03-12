@@ -11,3 +11,4 @@ export { usePagination } from './usePagination';
 export { useHeaderRefresh } from './useHeaderRefresh';
 export { useDisableModel } from './useDisableModel';
 export type { UseDisableModelOptions, UseDisableModelReturn } from './useDisableModel';
+export { useMonitorChannelActions } from './useMonitorChannelActions';

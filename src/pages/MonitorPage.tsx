@@ -29,6 +29,10 @@ import { ChannelStats } from '@/components/monitor/ChannelStats';
 import { FailureAnalysis } from '@/components/monitor/FailureAnalysis';
 import { RequestLogs } from '@/components/monitor/RequestLogs';
 import { ServiceHealthCard } from '@/components/monitor/ServiceHealthCard';
+import { hasDisableAllModelsRule } from '@/components/providers/utils';
+import type { MonitorSourceMeta } from '@/utils/monitor';
+import { buildCandidateUsageSourceIds } from '@/utils/usage';
+import { maskApiKey } from '@/utils/format';
 import styles from './MonitorPage.module.scss';
 
 // 注册 Chart.js 组件
@@ -50,6 +54,54 @@ ChartJS.register(
 // 时间范围选项
 export type TimeRange = 'yesterday' | 'dayBeforeYesterday' | 1 | 7 | 14 | 30;
 
+const getHostLabel = (value?: string) => {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return '';
+  try {
+    const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    return new URL(normalized).host;
+  } catch {
+    return trimmed.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+  }
+};
+
+const buildSourceSummary = (prefix?: string, baseUrl?: string, fallback?: string) =>
+  [String(prefix ?? '').trim(), getHostLabel(baseUrl), String(fallback ?? '').trim()]
+    .filter(Boolean)
+    .join(' · ');
+
+const collectSourceAliases = (input: {
+  apiKey?: string;
+  prefix?: string;
+  extra?: Array<string | undefined>;
+}) => {
+  const aliases = new Set<string>();
+  const apiKey = String(input.apiKey ?? '').trim();
+  const prefix = String(input.prefix ?? '').trim();
+
+  if (apiKey) {
+    aliases.add(apiKey);
+    aliases.add(maskApiKey(apiKey));
+  }
+
+  if (prefix) {
+    aliases.add(prefix);
+  }
+
+  buildCandidateUsageSourceIds({ apiKey: apiKey || undefined, prefix: prefix || undefined }).forEach(
+    (id) => aliases.add(id)
+  );
+
+  (input.extra || []).forEach((value) => {
+    const trimmed = String(value ?? '').trim();
+    if (trimmed) {
+      aliases.add(trimmed);
+    }
+  });
+
+  return Array.from(aliases);
+};
+
 export function MonitorPage() {
   const { t } = useTranslation();
   const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
@@ -62,16 +114,36 @@ export function MonitorPage() {
   const [apiFilter, setApiFilter] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
   const [providerMap, setProviderMap] = useState<Record<string, string>>({});
-  const [providerModels, setProviderModels] = useState<Record<string, Set<string>>>({});
   const [providerTypeMap, setProviderTypeMap] = useState<Record<string, string>>({});
   const [authIndexMap, setAuthIndexMap] = useState<Record<string, string>>({});
+  const [sourceMetaMap, setSourceMetaMap] = useState<Record<string, MonitorSourceMeta>>({});
 
   // 加载渠道名称映射（支持所有提供商类型）
   const loadProviderMap = useCallback(async () => {
     try {
       const map: Record<string, string> = {};
-      const modelsMap: Record<string, Set<string>> = {};
       const typeMap: Record<string, string> = {};
+      const sourceMeta: Record<string, MonitorSourceMeta> = {};
+      const registerSourceMeta = (
+        aliases: string[],
+        providerName: string,
+        providerType: string,
+        meta: MonitorSourceMeta
+      ) => {
+        aliases.forEach((alias) => {
+          const key = String(alias || '').trim();
+          if (!key) return;
+          if (!(key in map)) {
+            map[key] = providerName;
+          }
+          if (!(key in typeMap)) {
+            typeMap[key] = providerType;
+          }
+          if (!(key in sourceMeta)) {
+            sourceMeta[key] = { ...meta, source: key };
+          }
+        });
+      };
 
       // 并行加载所有提供商配置
       const [openaiProviders, geminiKeys, claudeConfigs, codexConfigs, vertexConfigs, authFilesRes] = await Promise.all([
@@ -84,91 +156,110 @@ export function MonitorPage() {
       ]);
 
       // 处理 OpenAI 兼容提供商
-      openaiProviders.forEach((provider) => {
+      openaiProviders.forEach((provider, providerIndex) => {
         const providerName = provider.headers?.['X-Provider'] || provider.name || 'unknown';
-        const modelSet = new Set<string>();
-        (provider.models || []).forEach((m) => {
-          if (m.alias) modelSet.add(m.alias);
-          if (m.name) modelSet.add(m.name);
-        });
         const apiKeyEntries = provider.apiKeyEntries || [];
+        const providerAliases = collectSourceAliases({
+          prefix: provider.prefix,
+          extra: [provider.name],
+        });
+        registerSourceMeta(providerAliases, providerName, 'OpenAI', {
+          source: provider.prefix?.trim() || provider.name || providerName,
+          kind: 'openai',
+          providerType: 'OpenAI',
+          disabled: hasDisableAllModelsRule(provider.excludedModels),
+          canToggle: true,
+          copyValue: provider.name || provider.prefix || providerName,
+          editPath: `/ai-providers/openai/${providerIndex}`,
+          summary: buildSourceSummary(provider.prefix, provider.baseUrl, provider.name),
+        });
         apiKeyEntries.forEach((entry) => {
           const apiKey = entry.apiKey;
           if (apiKey) {
-            map[apiKey] = providerName;
-            modelsMap[apiKey] = modelSet;
-            typeMap[apiKey] = 'OpenAI';
+            registerSourceMeta(collectSourceAliases({ apiKey }), providerName, 'OpenAI', {
+              source: apiKey,
+              kind: 'openai',
+              providerType: 'OpenAI',
+              disabled: hasDisableAllModelsRule(provider.excludedModels),
+              canToggle: true,
+              copyValue: apiKey,
+              editPath: `/ai-providers/openai/${providerIndex}`,
+              summary: buildSourceSummary(provider.prefix, provider.baseUrl, provider.name),
+            });
           }
         });
-        if (provider.name) {
-          map[provider.name] = providerName;
-          modelsMap[provider.name] = modelSet;
-          typeMap[provider.name] = 'OpenAI';
-        }
       });
 
       // 处理 Gemini 提供商
-      geminiKeys.forEach((config) => {
+      geminiKeys.forEach((config, index) => {
         const apiKey = config.apiKey;
         if (apiKey) {
           const providerName = config.prefix?.trim() || 'Gemini';
-          map[apiKey] = providerName;
-          typeMap[apiKey] = 'Gemini';
+          registerSourceMeta(collectSourceAliases({ apiKey, prefix: config.prefix }), providerName, 'Gemini', {
+            source: apiKey,
+            kind: 'gemini',
+            providerType: 'Gemini',
+            disabled: hasDisableAllModelsRule(config.excludedModels),
+            canToggle: true,
+            copyValue: apiKey,
+            editPath: `/ai-providers/gemini/${index}`,
+            configIndex: index,
+            summary: buildSourceSummary(config.prefix, config.baseUrl),
+          });
         }
       });
 
-      // 处理 Claude 提供商
-      claudeConfigs.forEach((config) => {
+      claudeConfigs.forEach((config, index) => {
         const apiKey = config.apiKey;
         if (apiKey) {
           const providerName = config.prefix?.trim() || 'Claude';
-          map[apiKey] = providerName;
-          typeMap[apiKey] = 'Claude';
-          // 存储模型集合
-          if (config.models && config.models.length > 0) {
-            const modelSet = new Set<string>();
-            config.models.forEach((m) => {
-              if (m.alias) modelSet.add(m.alias);
-              if (m.name) modelSet.add(m.name);
-            });
-            modelsMap[apiKey] = modelSet;
-          }
+          registerSourceMeta(collectSourceAliases({ apiKey, prefix: config.prefix }), providerName, 'Claude', {
+            source: apiKey,
+            kind: 'claude',
+            providerType: 'Claude',
+            disabled: hasDisableAllModelsRule(config.excludedModels),
+            canToggle: true,
+            copyValue: apiKey,
+            editPath: `/ai-providers/claude/${index}`,
+            configIndex: index,
+            summary: buildSourceSummary(config.prefix, config.baseUrl),
+          });
         }
       });
 
-      // 处理 Codex 提供商
-      codexConfigs.forEach((config) => {
+      codexConfigs.forEach((config, index) => {
         const apiKey = config.apiKey;
         if (apiKey) {
           const providerName = config.prefix?.trim() || 'Codex';
-          map[apiKey] = providerName;
-          typeMap[apiKey] = 'Codex';
-          if (config.models && config.models.length > 0) {
-            const modelSet = new Set<string>();
-            config.models.forEach((m) => {
-              if (m.alias) modelSet.add(m.alias);
-              if (m.name) modelSet.add(m.name);
-            });
-            modelsMap[apiKey] = modelSet;
-          }
+          registerSourceMeta(collectSourceAliases({ apiKey, prefix: config.prefix }), providerName, 'Codex', {
+            source: apiKey,
+            kind: 'codex',
+            providerType: 'Codex',
+            disabled: hasDisableAllModelsRule(config.excludedModels),
+            canToggle: true,
+            copyValue: apiKey,
+            editPath: `/ai-providers/codex/${index}`,
+            configIndex: index,
+            summary: buildSourceSummary(config.prefix, config.baseUrl),
+          });
         }
       });
 
-      // 处理 Vertex 提供商
-      vertexConfigs.forEach((config) => {
+      vertexConfigs.forEach((config, index) => {
         const apiKey = config.apiKey;
         if (apiKey) {
           const providerName = config.prefix?.trim() || 'Vertex';
-          map[apiKey] = providerName;
-          typeMap[apiKey] = 'Vertex';
-          if (config.models && config.models.length > 0) {
-            const modelSet = new Set<string>();
-            config.models.forEach((m) => {
-              if (m.alias) modelSet.add(m.alias);
-              if (m.name) modelSet.add(m.name);
-            });
-            modelsMap[apiKey] = modelSet;
-          }
+          registerSourceMeta(collectSourceAliases({ apiKey, prefix: config.prefix }), providerName, 'Vertex', {
+            source: apiKey,
+            kind: 'vertex',
+            providerType: 'Vertex',
+            disabled: hasDisableAllModelsRule(config.excludedModels),
+            canToggle: true,
+            copyValue: apiKey,
+            editPath: `/ai-providers/vertex/${index}`,
+            configIndex: index,
+            summary: buildSourceSummary(config.prefix, config.baseUrl),
+          });
         }
       });
 
@@ -193,7 +284,17 @@ export function MonitorPage() {
         const providerName = authTypeToProvider[fileType] || fileType;
         map[name] = providerName;
         typeMap[name] = providerName;
-        // auth_index → 文件名映射（供 RequestLogs 使用）
+        sourceMeta[name] = {
+          source: name,
+          kind: 'auth-file',
+          providerType: providerName,
+          disabled: Boolean(file.disabled),
+          canToggle: true,
+          copyValue: name,
+          editPath: '/auth-files',
+          authFileName: name,
+          summary: name,
+        };
         const rawAuthIndex = (file as Record<string, unknown>)['auth_index'] ?? file.authIndex;
         if (rawAuthIndex !== undefined && rawAuthIndex !== null) {
           const authIndexKey = String(rawAuthIndex).trim();
@@ -204,9 +305,9 @@ export function MonitorPage() {
       });
 
       setProviderMap(map);
-      setProviderModels(modelsMap);
       setProviderTypeMap(typeMap);
       setAuthIndexMap(authIdxMap);
+      setSourceMetaMap(sourceMeta);
     } catch (err) {
       console.warn('Monitor: Failed to load provider map:', err);
     }
@@ -336,8 +437,20 @@ export function MonitorPage() {
 
       {/* 统计表格 */}
       <div className={styles.statsGrid}>
-        <ChannelStats refreshKey={refreshKey} loading={loading} providerMap={providerMap} providerModels={providerModels} />
-        <FailureAnalysis refreshKey={refreshKey} loading={loading} providerMap={providerMap} providerModels={providerModels} />
+        <ChannelStats
+          refreshKey={refreshKey}
+          loading={loading}
+          providerMap={providerMap}
+          sourceMetaMap={sourceMetaMap}
+          onSourceChanged={loadData}
+        />
+        <FailureAnalysis
+          refreshKey={refreshKey}
+          loading={loading}
+          providerMap={providerMap}
+          sourceMetaMap={sourceMetaMap}
+          onSourceChanged={loadData}
+        />
       </div>
 
       {/* 请求日志 */}
@@ -348,6 +461,8 @@ export function MonitorPage() {
         providerTypeMap={providerTypeMap}
         apiFilter={apiFilter}
         authIndexMap={authIndexMap}
+        sourceMetaMap={sourceMetaMap}
+        onSourceChanged={loadData}
       />
     </div>
   );

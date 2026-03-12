@@ -3,10 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Card } from '@/components/ui/Card';
 import { monitorApi, type MonitorRequestLogItem } from '@/services/api';
-import { useDisableModel } from '@/hooks';
+import { useMonitorChannelActions } from '@/hooks';
 import { TimeRangeSelector, formatTimeRangeCaption, type TimeRange } from './TimeRangeSelector';
-import { DisableModelModal } from './DisableModelModal';
-import { UnsupportedDisableModal } from './UnsupportedDisableModal';
 import {
   maskSecret,
   formatProviderDisplay,
@@ -16,6 +14,7 @@ import {
   buildMonitorTimeRangeParams,
   formatCompactTokenNumber,
   type DateRange,
+  type MonitorSourceMeta,
 } from '@/utils/monitor';
 import styles from '@/pages/MonitorPage.module.scss';
 
@@ -26,6 +25,8 @@ interface RequestLogsProps {
   providerTypeMap: Record<string, string>;
   apiFilter: string;
   authIndexMap: Record<string, string>;
+  sourceMetaMap: Record<string, MonitorSourceMeta>;
+  onSourceChanged: () => Promise<void>;
 }
 
 interface LogEntry {
@@ -57,6 +58,8 @@ export function RequestLogs({
   providerTypeMap,
   apiFilter,
   authIndexMap,
+  sourceMetaMap,
+  onSourceChanged,
 }: RequestLogsProps) {
   const { t } = useTranslation();
   const [filterApi, setFilterApi] = useState('');
@@ -91,17 +94,10 @@ export function RequestLogs({
     sources: [],
   });
 
-  // 使用禁用模型 Hook
-  const {
-    disableState,
-    unsupportedState,
-    disabling,
-    isModelDisabled,
-    handleDisableClick,
-    handleConfirmDisable,
-    handleCancelDisable,
-    handleCloseUnsupported,
-  } = useDisableModel({ providerMap, providerTypeMap });
+  const { pendingSource, toggleSource, isSourceDisabled } = useMonitorChannelActions({
+    sourceMetaMap,
+    onChanged: onSourceChanged,
+  });
 
   const handleScroll = useCallback(() => {
     if (tableContainerRef.current && headerRef.current) {
@@ -285,11 +281,15 @@ export function RequestLogs({
   };
 
   const renderRow = (entry: LogEntry) => {
-    const disabled = isModelDisabled(entry.source, entry.model);
-    // 将 authIndex 映射为文件名
     const authDisplayName = entry.authIndex
       ? authIndexMap[entry.authIndex] || entry.authIndex
       : '-';
+    const authSourceKey = entry.authIndex ? authIndexMap[entry.authIndex] || '' : '';
+    const actionSourceKey =
+      (entry.source && sourceMetaMap[entry.source] ? entry.source : '') ||
+      (authSourceKey && sourceMetaMap[authSourceKey] ? authSourceKey : '');
+    const sourceMeta = actionSourceKey ? sourceMetaMap[actionSourceKey] : undefined;
+    const disabled = actionSourceKey ? isSourceDisabled(actionSourceKey) : false;
 
     return (
       <>
@@ -298,14 +298,19 @@ export function RequestLogs({
         <td>{entry.providerType}</td>
         <td title={entry.model}>{entry.model}</td>
         <td title={entry.source}>
-          {entry.providerName ? (
-            <>
-              <span className={styles.channelName}>{entry.providerName}</span>
-              <span className={styles.channelSecret}> ({entry.maskedKey})</span>
-            </>
-          ) : (
-            entry.maskedKey
-          )}
+          <div className={styles.channelCell}>
+            <div>
+              {entry.providerName ? (
+                <>
+                  <span className={styles.channelName}>{entry.providerName}</span>
+                  <span className={styles.channelSecret}> ({entry.maskedKey})</span>
+                </>
+              ) : (
+                entry.maskedKey
+              )}
+            </div>
+            {sourceMeta?.summary && <div className={styles.channelMeta}>{sourceMeta.summary}</div>}
+          </div>
         </td>
         <td>
           <span className={`${styles.statusPill} ${entry.failed ? styles.failed : styles.success}`}>
@@ -337,18 +342,18 @@ export function RequestLogs({
         </td>
         <td>{formatTimestamp(entry.timestamp)}</td>
         <td>
-          {entry.source && entry.source !== '-' && entry.source !== 'unknown' ? (
-            disabled ? (
-              <span className={styles.disabledLabel}>{t('monitor.logs.disabled')}</span>
-            ) : (
-              <button
-                className={styles.disableBtn}
-                title={t('monitor.logs.disable_model')}
-                onClick={() => handleDisableClick(entry.source, entry.model)}
-              >
-                {t('monitor.logs.disable')}
-              </button>
-            )
+          {actionSourceKey && sourceMeta?.canToggle ? (
+            <button
+              className={disabled ? styles.enableBtn : styles.disableBtn}
+              onClick={() => void toggleSource(actionSourceKey)}
+              disabled={pendingSource === actionSourceKey}
+            >
+              {pendingSource === actionSourceKey
+                ? t('common.loading')
+                : disabled
+                  ? '启用'
+                  : '禁用'}
+            </button>
           ) : (
             '-'
           )}
@@ -604,15 +609,6 @@ export function RequestLogs({
           </div>
         )}
       </Card>
-
-      <DisableModelModal
-        disableState={disableState}
-        disabling={disabling}
-        onConfirm={handleConfirmDisable}
-        onCancel={handleCancelDisable}
-      />
-
-      <UnsupportedDisableModal state={unsupportedState} onClose={handleCloseUnsupported} />
     </>
   );
 }

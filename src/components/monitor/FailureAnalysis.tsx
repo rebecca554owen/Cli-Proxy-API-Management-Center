@@ -2,15 +2,15 @@ import { useMemo, useState, useCallback, Fragment, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
 import { monitorApi, type MonitorFailureStatsItem } from '@/services/api';
-import { useDisableModel } from '@/hooks';
+import { useMonitorChannelActions } from '@/hooks';
 import { TimeRangeSelector, type TimeRange } from './TimeRangeSelector';
-import { DisableModelModal } from './DisableModelModal';
 import {
   formatTimestamp,
   getRateClassName,
   getProviderDisplayParts,
   buildMonitorTimeRangeParams,
   type DateRange,
+  type MonitorSourceMeta,
 } from '@/utils/monitor';
 import styles from '@/pages/MonitorPage.module.scss';
 
@@ -18,7 +18,8 @@ interface FailureAnalysisProps {
   refreshKey: number;
   loading: boolean;
   providerMap: Record<string, string>;
-  providerModels: Record<string, Set<string>>;
+  sourceMetaMap: Record<string, MonitorSourceMeta>;
+  onSourceChanged: () => Promise<void>;
 }
 
 interface ModelFailureStat {
@@ -45,7 +46,13 @@ interface ChannelFilterOption {
   label: string;
 }
 
-export function FailureAnalysis({ refreshKey, loading, providerMap, providerModels }: FailureAnalysisProps) {
+export function FailureAnalysis({
+  refreshKey,
+  loading,
+  providerMap,
+  sourceMetaMap,
+  onSourceChanged,
+}: FailureAnalysisProps) {
   const { t } = useTranslation();
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
   const [filterChannel, setFilterChannel] = useState('');
@@ -58,14 +65,11 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
   const [filters, setFilters] = useState<{ channels: ChannelFilterOption[]; models: string[] }>({ channels: [], models: [] });
   const [analysisLoading, setAnalysisLoading] = useState(false);
 
-  const {
-    disableState,
-    disabling,
-    isModelDisabled,
-    handleDisableClick: onDisableClick,
-    handleConfirmDisable,
-    handleCancelDisable,
-  } = useDisableModel({ providerMap, providerModels });
+  const { pendingSource, copySourceValue, openEditor, toggleSource, isSourceDisabled } =
+    useMonitorChannelActions({
+      sourceMetaMap,
+      onChanged: onSourceChanged,
+    });
 
   const handleTimeRangeChange = useCallback((range: TimeRange, custom?: DateRange) => {
     setTimeRange(range);
@@ -172,19 +176,14 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
     return Object.entries(modelsMap)
       .filter(([, stat]) => stat.failure > 0)
       .sort((a, b) => {
-        const aDisabled = isModelDisabled(source, a[0]);
-        const bDisabled = isModelDisabled(source, b[0]);
+        const aDisabled = isSourceDisabled(source);
+        const bDisabled = isSourceDisabled(source);
         if (aDisabled !== bDisabled) {
           return aDisabled ? 1 : -1;
         }
         return b[1].failure - a[1].failure;
       })
       .slice(0, 2);
-  };
-
-  const handleDisableClick = (source: string, model: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    onDisableClick(source, model);
   };
 
   return (
@@ -236,6 +235,7 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
                   <th>{t('monitor.failure.header_count')}</th>
                   <th>{t('monitor.failure.header_time')}</th>
                   <th>{t('monitor.failure.header_models')}</th>
+                  <th>{t('monitor.logs.header_actions')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -250,14 +250,21 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
                         onClick={() => toggleExpand(stat.source)}
                       >
                         <td>
-                          {stat.providerName ? (
-                            <>
-                              <span className={styles.channelName}>{stat.providerName}</span>
-                              <span className={styles.channelSecret}> ({stat.maskedKey})</span>
-                            </>
-                          ) : (
-                            stat.maskedKey
-                          )}
+                          <div className={styles.channelCell}>
+                            <div>
+                              {stat.providerName ? (
+                                <>
+                                  <span className={styles.channelName}>{stat.providerName}</span>
+                                  <span className={styles.channelSecret}> ({stat.maskedKey})</span>
+                                </>
+                              ) : (
+                                stat.maskedKey
+                              )}
+                            </div>
+                            {sourceMetaMap[stat.source]?.summary && (
+                              <div className={styles.channelMeta}>{sourceMetaMap[stat.source]?.summary}</div>
+                            )}
+                          </div>
                         </td>
                         <td className={styles.kpiFailure}>{stat.failedCount.toLocaleString()}</td>
                         <td>{formatTimestamp(stat.lastFailTime)}</td>
@@ -265,7 +272,7 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
                           {topModels.map(([model, modelStat]) => {
                             const percent = stat.failedCount > 0 ? ((modelStat.failure / stat.failedCount) * 100).toFixed(0) : '0';
                             const shortModel = model.length > 16 ? `${model.slice(0, 13)}...` : model;
-                            const disabled = isModelDisabled(stat.source, model);
+                            const disabled = isSourceDisabled(stat.source);
                             return (
                               <span
                                 key={model}
@@ -280,10 +287,35 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
                             <span className={styles.moreModelsHint}>+{totalFailedModels - 2}</span>
                           )}
                         </td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <div className={styles.tableActions}>
+                            <button className={styles.actionBtn} onClick={() => void copySourceValue(stat.source)}>
+                              {t('common.copy')}
+                            </button>
+                            {sourceMetaMap[stat.source]?.editPath && (
+                              <button className={styles.actionBtn} onClick={() => openEditor(stat.source)}>
+                                {t('common.edit')}
+                              </button>
+                            )}
+                            {sourceMetaMap[stat.source]?.canToggle && (
+                              <button
+                                className={isSourceDisabled(stat.source) ? styles.enableBtn : styles.disableBtn}
+                                onClick={() => void toggleSource(stat.source)}
+                                disabled={pendingSource === stat.source}
+                              >
+                                {pendingSource === stat.source
+                                  ? t('common.loading')
+                                  : isSourceDisabled(stat.source)
+                                    ? '启用'
+                                    : '禁用'}
+                              </button>
+                            )}
+                          </div>
+                        </td>
                       </tr>
                       {expandedChannel === stat.source && (
                         <tr key={`${stat.source}-detail`}>
-                          <td colSpan={4} className={styles.expandDetail}>
+                          <td colSpan={5} className={styles.expandDetail}>
                             <div className={styles.expandTableWrapper}>
                               <table className={styles.table}>
                                 <thead>
@@ -301,15 +333,15 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
                                   {Object.entries(stat.models)
                                     .filter(([, m]) => m.failure > 0)
                                     .sort((a, b) => {
-                                      const aDisabled = isModelDisabled(stat.source, a[0]);
-                                      const bDisabled = isModelDisabled(stat.source, b[0]);
+                                      const aDisabled = isSourceDisabled(stat.source);
+                                      const bDisabled = isSourceDisabled(stat.source);
                                       if (aDisabled !== bDisabled) {
                                         return aDisabled ? 1 : -1;
                                       }
                                       return b[1].failure - a[1].failure;
                                     })
                                     .map(([modelName, modelStat]) => {
-                                      const disabled = isModelDisabled(stat.source, modelName);
+                                      const disabled = isSourceDisabled(stat.source);
                                       return (
                                         <tr key={modelName} className={disabled ? styles.modelDisabled : ''}>
                                           <td>{modelName}</td>
@@ -333,18 +365,7 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
                                             </div>
                                           </td>
                                           <td>{formatTimestamp(modelStat.lastTimestamp)}</td>
-                                          <td>
-                                            {disabled ? (
-                                              <span className={styles.disabledLabel}>{t('monitor.logs.removed')}</span>
-                                            ) : stat.source && stat.source !== '-' && stat.source !== 'unknown' ? (
-                                              <button
-                                                className={styles.disableBtn}
-                                                onClick={(e) => handleDisableClick(stat.source, modelName, e)}
-                                              >
-                                                {t('monitor.logs.disable')}
-                                              </button>
-                                            ) : '-'}
-                                          </td>
+                                          <td>-</td>
                                         </tr>
                                       );
                                     })}
@@ -362,13 +383,6 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
           )}
         </div>
       </Card>
-
-      <DisableModelModal
-        disableState={disableState}
-        disabling={disabling}
-        onConfirm={handleConfirmDisable}
-        onCancel={handleCancelDisable}
-      />
     </>
   );
 }

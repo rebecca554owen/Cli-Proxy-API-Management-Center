@@ -15,7 +15,13 @@ import {
 import styles from '@/pages/AiProvidersPage.module.scss';
 import { ProviderList } from '../ProviderList';
 import { ProviderStatusBar } from '../ProviderStatusBar';
-import { formatProviderEndpoint, getOpenAIProviderStats, getTotalRequests, summarizeMappings } from '../utils';
+import {
+  formatProviderEndpoint,
+  getOpenAIProviderStats,
+  getTotalRequests,
+  hasDisableAllModelsRule,
+  summarizeMappings
+} from '../utils';
 
 interface OpenAISectionProps {
   configs: OpenAIProviderConfig[];
@@ -29,6 +35,7 @@ interface OpenAISectionProps {
   onDuplicate: (index: number) => void;
   onEdit: (index: number) => void;
   onDelete: (index: number) => void;
+  onToggle: (index: number, enabled: boolean) => void;
 }
 
 export function OpenAISection({
@@ -43,9 +50,11 @@ export function OpenAISection({
   onDuplicate,
   onEdit,
   onDelete,
+  onToggle,
 }: OpenAISectionProps) {
   const { t } = useTranslation();
   const actionsDisabled = disableControls || loading || isSwitching;
+  const toggleDisabled = disableControls || loading || isSwitching;
   const statusBarCache = useMemo(() => {
     const cache = new Map<string, ReturnType<typeof calculateStatusBarData>>();
     configs.forEach((provider, index) => {
@@ -95,6 +104,7 @@ export function OpenAISection({
           onEdit={onEdit}
           onDelete={onDelete}
           actionsDisabled={actionsDisabled}
+          getRowDisabled={(item) => hasDisableAllModelsRule(item.excludedModels)}
           extraActionButtons={(_, index) => (
             <Button
               variant="secondary"
@@ -106,10 +116,26 @@ export function OpenAISection({
               {t('common.copy')}
             </Button>
           )}
+          renderExtraActions={(item, index) => (
+            <Button
+              variant="secondary"
+              size="sm"
+              className={`${styles.providerActionButton} ${
+                hasDisableAllModelsRule(item.excludedModels)
+                  ? styles.providerEnableButton
+                  : styles.providerDisableButton
+              }`}
+              disabled={toggleDisabled}
+              onClick={() => void onToggle(index, hasDisableAllModelsRule(item.excludedModels))}
+            >
+              {hasDisableAllModelsRule(item.excludedModels) ? '启用' : '禁用'}
+            </Button>
+          )}
           renderContent={(item, index) => {
             const stats = getOpenAIProviderStats(item.apiKeyEntries, keyStats, item.prefix);
             const totalRequests = getTotalRequests(stats);
             const apiKeyEntries = item.apiKeyEntries || [];
+            const configDisabled = hasDisableAllModelsRule(item.excludedModels);
             const statusData =
               statusBarCache.get(item.name || `openai-provider-${index}`) || calculateStatusBarData([]);
             const mappingSummary = summarizeMappings(
@@ -198,6 +224,11 @@ export function OpenAISection({
                         <div className={styles.providerMetaLine}>Test: {item.testModel}</div>
                       )}
                     </div>
+                    {configDisabled && (
+                      <div className={styles.providerMetaLine}>
+                        {t('ai_providers.config_disabled_badge')}
+                      </div>
+                    )}
                   </div>
                 </div>
               </Fragment>

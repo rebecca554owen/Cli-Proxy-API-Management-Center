@@ -56,6 +56,28 @@ export interface DisableState {
   step: number;
 }
 
+export type MonitorSourceKind =
+  | 'openai'
+  | 'gemini'
+  | 'claude'
+  | 'codex'
+  | 'vertex'
+  | 'auth-file'
+  | 'unknown';
+
+export interface MonitorSourceMeta {
+  source: string;
+  kind: MonitorSourceKind;
+  providerType: string;
+  disabled: boolean;
+  canToggle: boolean;
+  copyValue: string;
+  editPath?: string;
+  authFileName?: string;
+  configIndex?: number;
+  summary?: string;
+}
+
 /**
  * 脱敏 API Key
  * @param key API Key 字符串
@@ -316,4 +338,3 @@ export function createDisableState(
     : `${maskSecret(source)} / ${model}`;
   return { source, model, displayName, step: 1 };
 }
-

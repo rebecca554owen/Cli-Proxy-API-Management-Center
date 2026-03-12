@@ -102,7 +102,11 @@ export function CodexSection({
             <Button
               variant="secondary"
               size="sm"
-              className={styles.providerActionButton}
+              className={`${styles.providerActionButton} ${
+                hasDisableAllModelsRule(item.excludedModels)
+                  ? styles.providerEnableButton
+                  : styles.providerDisableButton
+              }`}
               disabled={toggleDisabled}
               onClick={() => void onToggle(index, hasDisableAllModelsRule(item.excludedModels))}
             >

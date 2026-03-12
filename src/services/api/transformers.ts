@@ -225,6 +225,12 @@ const normalizeOpenAIProvider = (provider: unknown): OpenAIProviderConfig | null
 
   const headers = normalizeHeaders(provider.headers);
   const models = normalizeModelAliases(provider.models);
+  const excludedModels = normalizeExcludedModels(
+    provider['excluded-models'] ??
+      provider.excludedModels ??
+      provider['excluded_models'] ??
+      provider.excluded_models
+  );
   const priority = provider.priority ?? provider['priority'];
   const testModel = provider['test-model'] ?? provider.testModel;
 
@@ -238,6 +244,7 @@ const normalizeOpenAIProvider = (provider: unknown): OpenAIProviderConfig | null
   if (prefix) result.prefix = prefix;
   if (headers) result.headers = headers;
   if (models.length) result.models = models;
+  if (excludedModels.length) result.excludedModels = excludedModels;
   if (priority !== undefined) result.priority = Number(priority);
   if (testModel) result.testModel = String(testModel);
   return result;
