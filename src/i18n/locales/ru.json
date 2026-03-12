@@ -48,8 +48,8 @@
     "custom_headers_add": "Добавить заголовок",
     "custom_headers_key_placeholder": "Имя заголовка, например X-Custom-Header",
     "custom_headers_value_placeholder": "Значение заголовка",
-    "model_name_placeholder": "Имя модели, напр. claude-3-5-sonnet-20241022",
-    "model_alias_placeholder": "Псевдоним модели (необязательно)",
+    "model_name_placeholder": "Фактическая модель, напр. claude-3-5-sonnet-20241022",
+    "model_alias_placeholder": "Псевдоним для клиента",
     "invalid_provider_index": "Неверный индекс провайдера.",
     "unsaved_changes_title": "Несохранённые изменения",
     "unsaved_changes_message": "У вас есть несохранённые изменения. Если вы уйдёте, они будут потеряны. Выйти?"

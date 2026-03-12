@@ -1,6 +1,6 @@
 import type { ApiKeyEntry, GeminiKeyConfig, ProviderKeyConfig } from '@/types';
 import type { HeaderEntry } from '@/utils/headers';
-import type { KeyStats, StatusBarData } from '@/utils/usage';
+import type { KeyStats, StatusBarData, UsageDetail } from '@/utils/usage';
 
 export interface ModelEntry {
   name: string;
@@ -47,6 +47,7 @@ export interface ProviderSectionProps<TConfig> {
   configs: TConfig[];
   keyStats: KeyStats;
   statusBarBySource: Map<string, StatusBarData>;
+  usageDetails: UsageDetail[];
   disabled: boolean;
   onEdit: (index: number) => void;
   onAdd: () => void;

@@ -15,6 +15,14 @@ export interface KeyStats {
   byAuthIndex: Record<string, KeyStatBucket>;
 }
 
+export interface UsageDetail {
+  timestamp: string;
+  source: string;
+  auth_index: string | number;
+  failed: boolean;
+  __timestampMs?: number;
+}
+
 export const normalizeAuthIndex = (value: unknown) => {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value.toString();
@@ -183,6 +191,86 @@ export const EMPTY_STATUS_BAR: StatusBarData = {
   totalFailure: 0,
 };
 
+export function calculateStatusBarData(
+  usageDetails: UsageDetail[],
+  sourceFilter?: string,
+  authIndexFilter?: number
+): StatusBarData {
+  const BLOCK_COUNT = 20;
+  const BLOCK_DURATION_MS = 10 * 60 * 1000;
+  const WINDOW_MS = BLOCK_COUNT * BLOCK_DURATION_MS;
+  const now = Date.now();
+  const windowStart = now - WINDOW_MS;
+  const blockStats: Array<{ success: number; failure: number }> = Array.from(
+    { length: BLOCK_COUNT },
+    () => ({ success: 0, failure: 0 })
+  );
+  let totalSuccess = 0;
+  let totalFailure = 0;
+
+  usageDetails.forEach((detail) => {
+    const timestamp =
+      typeof detail.__timestampMs === 'number' ? detail.__timestampMs : Date.parse(detail.timestamp);
+    if (!Number.isFinite(timestamp) || timestamp <= 0 || timestamp < windowStart || timestamp > now) {
+      return;
+    }
+    if (sourceFilter !== undefined && detail.source !== sourceFilter) {
+      return;
+    }
+    if (authIndexFilter !== undefined && normalizeAuthIndex(detail.auth_index) !== String(authIndexFilter)) {
+      return;
+    }
+
+    const ageMs = now - timestamp;
+    const blockIndex = BLOCK_COUNT - 1 - Math.floor(ageMs / BLOCK_DURATION_MS);
+    if (blockIndex < 0 || blockIndex >= BLOCK_COUNT) {
+      return;
+    }
+
+    if (detail.failed) {
+      blockStats[blockIndex].failure += 1;
+      totalFailure += 1;
+    } else {
+      blockStats[blockIndex].success += 1;
+      totalSuccess += 1;
+    }
+  });
+
+  const blocks: StatusBlockState[] = [];
+  const blockDetails: StatusBlockDetail[] = [];
+
+  blockStats.forEach((stat, idx) => {
+    const total = stat.success + stat.failure;
+    if (total === 0) {
+      blocks.push('idle');
+    } else if (stat.failure === 0) {
+      blocks.push('success');
+    } else if (stat.success === 0) {
+      blocks.push('failure');
+    } else {
+      blocks.push('mixed');
+    }
+
+    const blockStartTime = windowStart + idx * BLOCK_DURATION_MS;
+    blockDetails.push({
+      success: stat.success,
+      failure: stat.failure,
+      rate: total > 0 ? stat.success / total : -1,
+      startTime: blockStartTime,
+      endTime: blockStartTime + BLOCK_DURATION_MS,
+    });
+  });
+
+  const total = totalSuccess + totalFailure;
+  return {
+    blocks,
+    blockDetails,
+    successRate: total > 0 ? (totalSuccess / total) * 100 : 100,
+    totalSuccess,
+    totalFailure,
+  };
+}
+
 /**
  * 将 monitor/key-stats 返回的 blocks 数组转换为 StatusBarData
  */
@@ -240,9 +328,59 @@ export function lookupStatusBar(
   map: Map<string, StatusBarData>,
   candidates: string[]
 ): StatusBarData {
-  for (const candidate of candidates) {
-    const data = map.get(candidate);
-    if (data) return data;
+  const matched = Array.from(new Set(candidates))
+    .map((candidate) => map.get(candidate))
+    .filter(Boolean) as StatusBarData[];
+
+  if (!matched.length) {
+    return EMPTY_STATUS_BAR;
   }
-  return EMPTY_STATUS_BAR;
+
+  if (matched.length === 1) {
+    return matched[0];
+  }
+
+  const blockCount = matched[0]?.blockDetails.length ?? 0;
+  if (!blockCount) {
+    return EMPTY_STATUS_BAR;
+  }
+
+  const blockDetails = Array.from({ length: blockCount }, (_, index) => {
+    const base = matched[0].blockDetails[index];
+    let success = 0;
+    let failure = 0;
+
+    matched.forEach((item) => {
+      const detail = item.blockDetails[index];
+      if (!detail) return;
+      success += detail.success;
+      failure += detail.failure;
+    });
+
+    const total = success + failure;
+    return {
+      success,
+      failure,
+      rate: total > 0 ? success / total : -1,
+      startTime: base?.startTime ?? 0,
+      endTime: base?.endTime ?? 0,
+    };
+  });
+
+  const totalSuccess = blockDetails.reduce((sum, detail) => sum + detail.success, 0);
+  const totalFailure = blockDetails.reduce((sum, detail) => sum + detail.failure, 0);
+  const total = totalSuccess + totalFailure;
+
+  return {
+    blocks: blockDetails.map((detail) => {
+      if (detail.rate === -1) return 'idle';
+      if (detail.failure === 0) return 'success';
+      if (detail.success === 0) return 'failure';
+      return 'mixed';
+    }),
+    blockDetails,
+    successRate: total > 0 ? (totalSuccess / total) * 100 : 100,
+    totalSuccess,
+    totalFailure,
+  };
 }

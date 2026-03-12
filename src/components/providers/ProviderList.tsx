@@ -23,7 +23,6 @@ interface ProviderListProps<T> {
   metaClassName?: string;
   actionsClassName?: string;
   actionButtonClassName?: string;
-  actionSlotCount?: number;
 }
 
 export function ProviderList<T>({
@@ -46,7 +45,6 @@ export function ProviderList<T>({
   metaClassName,
   actionsClassName,
   actionButtonClassName,
-  actionSlotCount = 4,
 }: ProviderListProps<T>) {
   const { t } = useTranslation();
 
@@ -87,7 +85,6 @@ export function ProviderList<T>({
             {deleteLabel || t('common.delete')}
           </Button>,
         ].filter(Boolean) as ReactNode[];
-        const placeholders = Math.max(actionSlotCount - actionNodes.length, 0);
         return (
           <div
             key={keyField(item, index)}
@@ -98,14 +95,6 @@ export function ProviderList<T>({
             <div className={actionsClassName || 'item-actions'}>
               {actionNodes.map((node, actionIndex) => (
                 <span key={actionIndex}>{node}</span>
-              ))}
-              {Array.from({ length: placeholders }, (_, placeholderIndex) => (
-                <span
-                  key={`placeholder-${placeholderIndex}`}
-                  className={actionButtonClassName}
-                  style={{ display: 'block', minHeight: 32, visibility: 'hidden' }}
-                  aria-hidden="true"
-                />
               ))}
             </div>
           </div>

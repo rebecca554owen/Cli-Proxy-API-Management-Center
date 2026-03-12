@@ -17,15 +17,15 @@ export function maskApiKey(key: string): string {
     return '';
   }
 
-  if (trimmed.length <= 10) {
-    const edge = Math.max(1, Math.floor(trimmed.length / 3));
-    return `${trimmed.slice(0, edge)}******${trimmed.slice(-edge)}`;
+  if (trimmed.length <= 12) {
+    const edge = Math.max(2, Math.floor(trimmed.length / 3));
+    return `${trimmed.slice(0, edge)}***${trimmed.slice(-edge)}`;
   }
 
   const start = trimmed.slice(0, 6);
-  const end = trimmed.slice(-4);
+  const end = trimmed.slice(-6);
 
-  return `${start}********${end}`;
+  return `${start}***${end}`;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -7,19 +7,19 @@ import type { ProviderKeyConfig } from '@/types';
 import { maskApiKey } from '@/utils/format';
 import {
   buildCandidateUsageSourceIds,
-  lookupStatusBar,
+  calculateStatusBarData,
   type KeyStats,
-  type StatusBarData,
+  type UsageDetail,
 } from '@/utils/usage';
 import styles from '@/pages/AiProvidersPage.module.scss';
 import { ProviderList } from '../ProviderList';
 import { ProviderStatusBar } from '../ProviderStatusBar';
-import { getStatsBySource } from '../utils';
+import { formatProviderEndpoint, getStatsBySource, getTotalRequests, summarizeMappings } from '../utils';
 
 interface VertexSectionProps {
   configs: ProviderKeyConfig[];
   keyStats: KeyStats;
-  statusBarBySource: Map<string, StatusBarData>;
+  usageDetails: UsageDetail[];
   loading: boolean;
   disableControls: boolean;
   isSwitching: boolean;
@@ -31,7 +31,7 @@ interface VertexSectionProps {
 export function VertexSection({
   configs,
   keyStats,
-  statusBarBySource,
+  usageDetails,
   loading,
   disableControls,
   isSwitching,
@@ -41,6 +41,17 @@ export function VertexSection({
 }: VertexSectionProps) {
   const { t } = useTranslation();
   const actionsDisabled = disableControls || loading || isSwitching;
+  const statusBarCache = useMemo(() => {
+    const cache = new Map<string, ReturnType<typeof calculateStatusBarData>>();
+    configs.forEach((config) => {
+      const candidates = buildCandidateUsageSourceIds({ apiKey: config.apiKey, prefix: config.prefix });
+      if (!candidates.length) return;
+      const candidateSet = new Set(candidates);
+      const filteredDetails = usageDetails.filter((detail) => candidateSet.has(detail.source));
+      cache.set(config.apiKey, calculateStatusBarData(filteredDetails));
+    });
+    return cache;
+  }, [configs, usageDetails]);
 
   return (
     <>
@@ -60,20 +71,12 @@ export function VertexSection({
         <ProviderList<ProviderKeyConfig>
           items={configs}
           loading={loading}
-          keyField={(item) => item.apiKey}
+          keyField={(item, index) => `${item.apiKey}-${index}`}
           listClassName={styles.providerTableList}
           rowClassName={styles.providerTableRow}
           metaClassName={styles.providerTableMeta}
           actionsClassName={styles.providerTableActions}
           actionButtonClassName={styles.providerActionButton}
-          header={
-            <div className={styles.providerTableHeader}>
-              <div className={styles.providerTableHeaderCell}>渠道与接口</div>
-              <div className={styles.providerTableHeaderCell}>模型别名--&gt;实际模型</div>
-              <div className={styles.providerTableHeaderCell}>{t('common.status')}</div>
-              <div className={styles.providerTableHeaderCell}>操作</div>
-            </div>
-          }
           emptyTitle={t('ai_providers.vertex_empty_title')}
           emptyDescription={t('ai_providers.vertex_empty_desc')}
           onEdit={onEdit}
@@ -81,70 +84,95 @@ export function VertexSection({
           actionsDisabled={actionsDisabled}
           renderContent={(item, index) => {
             const stats = getStatsBySource(item.apiKey, keyStats, item.prefix);
-            const headerEntries = Object.entries(item.headers || {});
-            const userAgent = headerEntries.find(([key]) => key.toLowerCase() === 'user-agent')?.[1];
-            const extraHeaders = headerEntries.filter(([key]) => key.toLowerCase() !== 'user-agent');
-            const statusData = lookupStatusBar(
-              statusBarBySource,
-              buildCandidateUsageSourceIds({ apiKey: item.apiKey, prefix: item.prefix })
+            const totalRequests = getTotalRequests(stats);
+            const statusData = statusBarCache.get(item.apiKey) || calculateStatusBarData([]);
+            const mappingSummary = summarizeMappings(
+              (item.models ?? []).map((model) => ({
+                source: model.alias || model.name,
+                target: model.name,
+              })),
+              6
             );
+            const mappingCount = mappingSummary.visible.length + mappingSummary.hiddenCount;
+            const endpoint = formatProviderEndpoint(item.baseUrl);
+            const groupName = item.prefix?.trim() || endpoint || `${t('ai_providers.vertex_item_title')} #${index + 1}`;
 
             return (
               <Fragment>
-                <div className={`${styles.providerTableCell} ${styles.providerMainCell}`}>
-                  <div className={styles.providerMainTitle}>
-                    {t('ai_providers.vertex_item_title')} #{index + 1}
-                  </div>
-                  <div className={`${styles.providerMetaLine} ${styles.providerMetaInline}`}>
-                    <span>{t('common.priority')}:</span>
-                    <span className={styles.providerPriorityBadge}>{item.priority ?? 0}</span>
-                  </div>
-                  {item.baseUrl && <div className={styles.providerMetaLine}>{item.baseUrl}</div>}
-                  <div className={`${styles.providerMetaLine} ${styles.providerMetaKey}`}>
-                    {maskApiKey(item.apiKey)}
-                  </div>
-                  {item.prefix && (
-                    <div className={styles.providerMetaLine}>
-                      {t('common.prefix')}: {item.prefix}
+                <div className={styles.providerCardHeader}>
+                  <div className={styles.providerCardLead}>
+                    <div className={styles.providerMainTitle}>
+                      {t('ai_providers.vertex_item_title')} #{index + 1}
                     </div>
-                  )}
-                  {item.proxyUrl && (
-                    <div className={styles.providerMetaLine}>
-                      {t('common.proxy_url')}: {item.proxyUrl}
+                    <div className={styles.providerKeyGroup}>{groupName}</div>
+                    <div className={`${styles.providerMetaLine} ${styles.providerMetaInline}`}>
+                      <span>P</span>
+                      <span className={styles.providerPriorityBadge}>{item.priority ?? 0}</span>
                     </div>
-                  )}
-                  {userAgent && <div className={styles.providerMetaLine}>UA: {userAgent}</div>}
-                  {extraHeaders.length > 0 && (
-                    <div className={styles.headerBadgeList}>
-                      {extraHeaders.map(([key, value]) => (
-                        <span key={key} className={styles.headerBadge}>
-                          <strong>{key}:</strong> {value}
-                        </span>
+                  </div>
+                  <div className={styles.providerMetricGrid}>
+                    <div className={styles.providerStatusStats}>
+                      <span className={`${styles.statPill} ${styles.statSuccess}`}>
+                        {t('stats.success')}: {stats.success}
+                      </span>
+                      <span className={`${styles.statPill} ${styles.statFailure}`}>
+                        {t('stats.failure')}: {stats.failure}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className={styles.providerCardBody}>
+                  <div className={styles.providerStatusRow}>
+                    <div className={styles.providerRequestMeta}>
+                      <span className={styles.providerRequestCount}>
+                        Req <strong>{totalRequests}</strong>
+                      </span>
+                    </div>
+                    <ProviderStatusBar statusData={statusData} />
+                  </div>
+                  <div className={styles.providerModelsColumn}>
+                    <div className={styles.providerModelHeader}>
+                      <div className={styles.providerColumnTitle}>模型映射</div>
+                      <span className={styles.providerRequestCount}>
+                        映射 <strong>{mappingCount}</strong>
+                      </span>
+                    </div>
+                    <div className={styles.providerModelList}>
+                      {mappingSummary.visible.map((model, summaryIndex) => (
+                        <div
+                          key={`${model.source}-${model.target}-${summaryIndex}`}
+                          className={styles.providerModelItem}
+                        >
+                          <span className={styles.providerModelSource}>{model.source}</span>
+                          <span className={styles.providerModelArrow}>-&gt;</span>
+                          <span className={styles.providerModelTarget}>{model.target}</span>
+                        </div>
                       ))}
+                      {mappingSummary.hiddenCount > 0 && (
+                        <div className={styles.providerModelMore}>+{mappingSummary.hiddenCount}</div>
+                      )}
                     </div>
-                  )}
-                </div>
-                <div className={`${styles.providerTableCell} ${styles.providerModelCell}`}>
-                  <div className={styles.providerModelList}>
-                    {(item.models ?? []).map((model) => (
-                      <div key={`${model.name}-${model.alias || 'default'}`} className={styles.providerModelItem}>
-                        <span className={styles.providerModelSource}>{model.alias || model.name}</span>
-                        <span className={styles.providerModelArrow}>-&gt;</span>
-                        <span className={styles.providerModelTarget}>{model.name}</span>
+                  </div>
+                  <div className={styles.providerInfoSummary}>
+                    <div className={styles.providerInfoCluster}>
+                      {endpoint && <div className={styles.providerMetaLine}>{endpoint}</div>}
+                      <div className={`${styles.providerMetaLine} ${styles.providerMetaKey}`}>
+                        {maskApiKey(item.apiKey)}
                       </div>
-                    ))}
+                    </div>
+                    <div className={styles.providerInfoCluster}>
+                      {item.prefix && (
+                        <div className={styles.providerMetaLine}>
+                          {t('common.prefix')}: {item.prefix}
+                        </div>
+                      )}
+                      {item.proxyUrl && (
+                        <div className={styles.providerMetaLine}>
+                          {t('common.proxy_url')}: {formatProviderEndpoint(item.proxyUrl)}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <div className={`${styles.providerTableCell} ${styles.providerStatusCell}`}>
-                  <div className={styles.providerStatusStats}>
-                    <span className={`${styles.statPill} ${styles.statSuccess}`}>
-                      {t('stats.success')}: {stats.success}
-                    </span>
-                    <span className={`${styles.statPill} ${styles.statFailure}`}>
-                      {t('stats.failure')}: {stats.failure}
-                    </span>
-                  </div>
-                  <ProviderStatusBar statusData={statusData} />
                 </div>
               </Fragment>
             );

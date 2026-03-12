@@ -48,8 +48,8 @@
     "custom_headers_add": "Add Header",
     "custom_headers_key_placeholder": "Header name, e.g. X-Custom-Header",
     "custom_headers_value_placeholder": "Header value",
-    "model_name_placeholder": "Model name, e.g. claude-3-5-sonnet-20241022",
-    "model_alias_placeholder": "Model alias (optional)",
+    "model_name_placeholder": "Actual model, e.g. claude-3-5-sonnet-20241022",
+    "model_alias_placeholder": "Alias shown to clients",
     "invalid_provider_index": "Invalid provider index.",
     "unsaved_changes_title": "Unsaved changes",
     "unsaved_changes_message": "You have unsaved changes. Leaving now will discard them. Do you want to leave?"

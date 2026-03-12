@@ -135,6 +135,39 @@ export const getOpenAIProviderStats = (
   return { success, failure };
 };
 
+export const getTotalRequests = (stats: KeyStatBucket): number => stats.success + stats.failure;
+
+export const formatProviderEndpoint = (value?: string): string => {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+
+  try {
+    const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+    const url = new URL(normalized);
+    const path = url.pathname.replace(/\/+$/g, '');
+    return `${url.host}${path && path !== '/' ? path : ''}`;
+  } catch {
+    return trimmed.replace(/^https?:\/\//i, '').replace(/\/+$/g, '');
+  }
+};
+
+export type MappingSummaryItem = {
+  source: string;
+  target: string;
+  muted?: boolean;
+};
+
+export const summarizeMappings = (
+  items: MappingSummaryItem[],
+  limit: number = 3
+): { visible: MappingSummaryItem[]; hiddenCount: number } => {
+  const normalized = items.filter((item) => item.source.trim() || item.target.trim());
+  return {
+    visible: normalized.slice(0, limit),
+    hiddenCount: Math.max(normalized.length - limit, 0),
+  };
+};
+
 export const buildApiKeyEntry = (input?: Partial<ApiKeyEntry>): ApiKeyEntry => ({
   apiKey: input?.apiKey ?? '',
   proxyUrl: input?.proxyUrl ?? '',

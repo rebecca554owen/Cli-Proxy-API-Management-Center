@@ -94,6 +94,23 @@ export function AiProvidersClaudeEditPage() {
     () => (form.apiKeys && form.apiKeys.length ? form.apiKeys : [form.apiKey ?? '']),
     [form.apiKey, form.apiKeys]
   );
+  const duplicateKeyIndexes = useMemo(() => {
+    const counts = new Map<string, number>();
+    keyList.forEach((value) => {
+      const trimmed = value.trim();
+      if (!trimmed) return;
+      counts.set(trimmed, (counts.get(trimmed) ?? 0) + 1);
+    });
+
+    return keyList.reduce<number[]>((acc, value, index) => {
+      const trimmed = value.trim();
+      if (trimmed && (counts.get(trimmed) ?? 0) > 1) {
+        acc.push(index);
+      }
+      return acc;
+    }, []);
+  }, [keyList]);
+  const hasDuplicateKeys = duplicateKeyIndexes.length > 0;
   const resolvedTestApiKey = useMemo(
     () => keyList.map((value) => value.trim()).find(Boolean) ?? '',
     [keyList]
@@ -296,7 +313,7 @@ export function AiProvidersClaudeEditPage() {
             size="sm"
             onClick={() => void handleSave()}
             loading={saving}
-            disabled={!canSave}
+            disabled={!canSave || hasDuplicateKeys}
             className={layoutStyles.floatingSaveButton}
           >
             {t('common.save')}
@@ -342,6 +359,13 @@ export function AiProvidersClaudeEditPage() {
                     {t('ai_providers.openai_keys_add_btn', { defaultValue: '添加密钥' })}
                   </Button>
                 </div>
+                {hasDuplicateKeys ? (
+                  <div className="status-badge warning">
+                    {t('ai_providers.claude_duplicate_keys_detected', {
+                      defaultValue: '检测到重复的 Claude API Key，请删除或修改重复项后再保存。',
+                    })}
+                  </div>
+                ) : null}
                 <div className={styles.keyTableShell}>
                   <div className={styles.keyTableHeader}>
                     <div className={styles.keyTableColIndex}>#</div>
@@ -349,7 +373,13 @@ export function AiProvidersClaudeEditPage() {
                     <div className={styles.keyTableColAction}>{t('common.action')}</div>
                   </div>
                   {keyList.map((keyValue, index) => (
-                    <div key={index} className={styles.keyTableRow} style={{ gridTemplateColumns: '46px minmax(320px, 1fr) 120px' }}>
+                    <div
+                      key={index}
+                      className={`${styles.keyTableRow} ${
+                        duplicateKeyIndexes.includes(index) ? styles.keyTableRowDuplicate : ''
+                      }`}
+                      style={{ gridTemplateColumns: '46px minmax(320px, 1fr) 120px' }}
+                    >
                       <div className={styles.keyTableColIndex}>{index + 1}</div>
                       <div className={styles.keyTableColKey}>
                         <input
@@ -387,7 +417,9 @@ export function AiProvidersClaudeEditPage() {
                             });
                           }}
                           disabled={saving || disableControls || isTesting}
-                          className={`input ${styles.keyTableInput}`}
+                          className={`input ${styles.keyTableInput} ${
+                            duplicateKeyIndexes.includes(index) ? styles.keyTableInputDuplicate : ''
+                          }`}
                           placeholder={t('ai_providers.claude_add_modal_key_placeholder')}
                         />
                       </div>
@@ -495,6 +527,7 @@ export function AiProvidersClaudeEditPage() {
                 onChange={(entries) => setForm((prev) => ({ ...prev, modelEntries: entries }))}
                 namePlaceholder={t('common.model_name_placeholder')}
                 aliasPlaceholder={t('common.model_alias_placeholder')}
+                aliasFirst
                 disabled={saving || disableControls || isTesting}
                 hideAddButton
                 className={styles.modelInputList}

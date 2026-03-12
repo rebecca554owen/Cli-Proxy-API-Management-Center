@@ -337,6 +337,7 @@ export function AiProvidersVertexEditPage() {
                 addLabel={t('ai_providers.vertex_models_add_btn')}
                 namePlaceholder={t('common.model_name_placeholder')}
                 aliasPlaceholder={t('common.model_alias_placeholder')}
+                aliasFirst
                 removeButtonTitle={t('common.delete')}
                 removeButtonAriaLabel={t('common.delete')}
                 disabled={disableControls || saving}
