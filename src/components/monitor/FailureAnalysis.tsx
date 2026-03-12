@@ -9,6 +9,7 @@ import {
   getRateClassName,
   getProviderDisplayParts,
   buildMonitorTimeRangeParams,
+  resolveMonitorSourceAction,
   type DateRange,
   type MonitorSourceMeta,
 } from '@/utils/monitor';
@@ -18,6 +19,7 @@ interface FailureAnalysisProps {
   refreshKey: number;
   loading: boolean;
   providerMap: Record<string, string>;
+  sourceAuthMap: Record<string, string>;
   sourceMetaMap: Record<string, MonitorSourceMeta>;
   onSourceChanged: () => Promise<void>;
 }
@@ -50,6 +52,7 @@ export function FailureAnalysis({
   refreshKey,
   loading,
   providerMap,
+  sourceAuthMap,
   sourceMetaMap,
   onSourceChanged,
 }: FailureAnalysisProps) {
@@ -240,6 +243,16 @@ export function FailureAnalysis({
               </thead>
               <tbody>
                 {filteredStats.map((stat) => {
+                  const resolvedAction = resolveMonitorSourceAction(
+                    stat.source,
+                    sourceMetaMap,
+                    undefined,
+                    undefined,
+                    sourceAuthMap
+                  );
+                  const actionSourceKey = resolvedAction.actionSourceKey;
+                  const sourceMeta = resolvedAction.meta;
+                  const disabled = actionSourceKey ? isSourceDisabled(actionSourceKey) : false;
                   const topModels = getTopFailedModels(stat.source, stat.models);
                   const totalFailedModels = Object.values(stat.models).filter((m) => m.failure > 0).length;
 
@@ -261,8 +274,8 @@ export function FailureAnalysis({
                                 stat.maskedKey
                               )}
                             </div>
-                            {sourceMetaMap[stat.source]?.summary && (
-                              <div className={styles.channelMeta}>{sourceMetaMap[stat.source]?.summary}</div>
+                            {sourceMeta?.summary && (
+                              <div className={styles.channelMeta}>{sourceMeta.summary}</div>
                             )}
                           </div>
                         </td>
@@ -272,7 +285,6 @@ export function FailureAnalysis({
                           {topModels.map(([model, modelStat]) => {
                             const percent = stat.failedCount > 0 ? ((modelStat.failure / stat.failedCount) * 100).toFixed(0) : '0';
                             const shortModel = model.length > 16 ? `${model.slice(0, 13)}...` : model;
-                            const disabled = isSourceDisabled(stat.source);
                             return (
                               <span
                                 key={model}
@@ -289,23 +301,29 @@ export function FailureAnalysis({
                         </td>
                         <td onClick={(e) => e.stopPropagation()}>
                           <div className={styles.tableActions}>
-                            <button className={styles.actionBtn} onClick={() => void copySourceValue(stat.source)}>
+                            <button
+                              className={styles.actionBtn}
+                              onClick={() => void copySourceValue(actionSourceKey || stat.source)}
+                            >
                               {t('common.copy')}
                             </button>
-                            {sourceMetaMap[stat.source]?.editPath && (
-                              <button className={styles.actionBtn} onClick={() => openEditor(stat.source)}>
+                            {sourceMeta?.editPath && (
+                              <button
+                                className={styles.actionBtn}
+                                onClick={() => openEditor(actionSourceKey || stat.source)}
+                              >
                                 {t('common.edit')}
                               </button>
                             )}
-                            {sourceMetaMap[stat.source]?.canToggle && (
+                            {sourceMeta?.canToggle && actionSourceKey && (
                               <button
-                                className={isSourceDisabled(stat.source) ? styles.enableBtn : styles.disableBtn}
-                                onClick={() => void toggleSource(stat.source)}
-                                disabled={pendingSource === stat.source}
+                                className={disabled ? styles.enableBtn : styles.disableBtn}
+                                onClick={() => void toggleSource(actionSourceKey)}
+                                disabled={pendingSource === actionSourceKey}
                               >
-                                {pendingSource === stat.source
+                                {pendingSource === actionSourceKey
                                   ? t('common.loading')
-                                  : isSourceDisabled(stat.source)
+                                  : disabled
                                     ? '启用'
                                     : '禁用'}
                               </button>
@@ -333,15 +351,14 @@ export function FailureAnalysis({
                                   {Object.entries(stat.models)
                                     .filter(([, m]) => m.failure > 0)
                                     .sort((a, b) => {
-                                      const aDisabled = isSourceDisabled(stat.source);
-                                      const bDisabled = isSourceDisabled(stat.source);
+                                      const aDisabled = disabled;
+                                      const bDisabled = disabled;
                                       if (aDisabled !== bDisabled) {
                                         return aDisabled ? 1 : -1;
                                       }
                                       return b[1].failure - a[1].failure;
                                     })
                                     .map(([modelName, modelStat]) => {
-                                      const disabled = isSourceDisabled(stat.source);
                                       return (
                                         <tr key={modelName} className={disabled ? styles.modelDisabled : ''}>
                                           <td>{modelName}</td>

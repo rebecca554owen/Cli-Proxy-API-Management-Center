@@ -36,6 +36,12 @@ export interface MonitorRequestLogsQuery extends MonitorTimeRangeQuery {
   status?: '' | 'success' | 'failed';
 }
 
+export interface MonitorRequestLogsFilterOptions {
+  apis?: string[];
+  models?: string[];
+  sources?: string[];
+}
+
 export interface MonitorRequestLogItem {
   timestamp: string;
   api_key: string;

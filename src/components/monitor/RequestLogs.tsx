@@ -13,6 +13,7 @@ import {
   getProviderDisplayParts,
   buildMonitorTimeRangeParams,
   formatCompactTokenNumber,
+  resolveMonitorSourceAction,
   type DateRange,
   type MonitorSourceMeta,
 } from '@/utils/monitor';
@@ -25,6 +26,7 @@ interface RequestLogsProps {
   providerTypeMap: Record<string, string>;
   apiFilter: string;
   authIndexMap: Record<string, string>;
+  sourceAuthMap: Record<string, string>;
   sourceMetaMap: Record<string, MonitorSourceMeta>;
   onSourceChanged: () => Promise<void>;
 }
@@ -58,6 +60,7 @@ export function RequestLogs({
   providerTypeMap,
   apiFilter,
   authIndexMap,
+  sourceAuthMap,
   sourceMetaMap,
   onSourceChanged,
 }: RequestLogsProps) {
@@ -94,7 +97,7 @@ export function RequestLogs({
     sources: [],
   });
 
-  const { pendingSource, toggleSource, isSourceDisabled } = useMonitorChannelActions({
+  const { pendingSource, copySourceValue, toggleSource, isSourceDisabled } = useMonitorChannelActions({
     sourceMetaMap,
     onChanged: onSourceChanged,
   });
@@ -284,11 +287,13 @@ export function RequestLogs({
     const authDisplayName = entry.authIndex
       ? authIndexMap[entry.authIndex] || entry.authIndex
       : '-';
-    const authSourceKey = entry.authIndex ? authIndexMap[entry.authIndex] || '' : '';
-    const actionSourceKey =
-      (entry.source && sourceMetaMap[entry.source] ? entry.source : '') ||
-      (authSourceKey && sourceMetaMap[authSourceKey] ? authSourceKey : '');
-    const sourceMeta = actionSourceKey ? sourceMetaMap[actionSourceKey] : undefined;
+    const { actionSourceKey, meta: sourceMeta } = resolveMonitorSourceAction(
+      entry.source,
+      sourceMetaMap,
+      authIndexMap,
+      entry.authIndex,
+      sourceAuthMap
+    );
     const disabled = actionSourceKey ? isSourceDisabled(actionSourceKey) : false;
 
     return (
@@ -342,21 +347,27 @@ export function RequestLogs({
         </td>
         <td>{formatTimestamp(entry.timestamp)}</td>
         <td>
-          {actionSourceKey && sourceMeta?.canToggle ? (
+          <div className={styles.tableActions}>
             <button
-              className={disabled ? styles.enableBtn : styles.disableBtn}
-              onClick={() => void toggleSource(actionSourceKey)}
-              disabled={pendingSource === actionSourceKey}
+              className={styles.actionBtn}
+              onClick={() => void copySourceValue(actionSourceKey || entry.source)}
             >
-              {pendingSource === actionSourceKey
-                ? t('common.loading')
-                : disabled
-                  ? '启用'
-                  : '禁用'}
+              {t('common.copy')}
             </button>
-          ) : (
-            '-'
-          )}
+            {actionSourceKey && sourceMeta?.canToggle && (
+              <button
+                className={disabled ? styles.enableBtn : styles.disableBtn}
+                onClick={() => void toggleSource(actionSourceKey)}
+                disabled={pendingSource === actionSourceKey}
+              >
+                {pendingSource === actionSourceKey
+                  ? t('common.loading')
+                  : disabled
+                    ? '启用'
+                    : '禁用'}
+              </button>
+            )}
+          </div>
         </td>
       </>
     );

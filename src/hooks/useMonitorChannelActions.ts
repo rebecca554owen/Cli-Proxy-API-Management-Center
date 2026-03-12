@@ -136,27 +136,28 @@ export function useMonitorChannelActions(
     if (!meta?.canToggle || pendingSource) {
       return;
     }
+    const targetSource = meta.canonicalSource || source;
 
     setPendingSource(source);
     try {
       switch (meta.kind) {
         case 'auth-file':
-          await authFilesApi.setStatus(meta.authFileName || source, !meta.disabled);
+          await authFilesApi.setStatus(meta.authFileName || targetSource, !meta.disabled);
           break;
         case 'gemini':
-          await updateGeminiSource(source, meta);
+          await updateGeminiSource(targetSource, meta);
           break;
         case 'claude':
-          await updateProviderSource(source, meta, providersApi.getClaudeConfigs, providersApi.saveClaudeConfigs);
+          await updateProviderSource(targetSource, meta, providersApi.getClaudeConfigs, providersApi.saveClaudeConfigs);
           break;
         case 'codex':
-          await updateProviderSource(source, meta, providersApi.getCodexConfigs, providersApi.saveCodexConfigs);
+          await updateProviderSource(targetSource, meta, providersApi.getCodexConfigs, providersApi.saveCodexConfigs);
           break;
         case 'vertex':
-          await updateProviderSource(source, meta, providersApi.getVertexConfigs, providersApi.saveVertexConfigs);
+          await updateProviderSource(targetSource, meta, providersApi.getVertexConfigs, providersApi.saveVertexConfigs);
           break;
         case 'openai':
-          await updateOpenAISource(source, meta);
+          await updateOpenAISource(targetSource, meta);
           break;
         default:
           return;

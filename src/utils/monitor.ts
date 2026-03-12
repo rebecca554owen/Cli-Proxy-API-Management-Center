@@ -67,6 +67,7 @@ export type MonitorSourceKind =
 
 export interface MonitorSourceMeta {
   source: string;
+  canonicalSource?: string;
   kind: MonitorSourceKind;
   providerType: string;
   disabled: boolean;
@@ -158,6 +159,62 @@ export function formatGeminiSource(source: string): string {
   return `${prefix}${name.slice(0, 3)}*${name.slice(-3)}`;
 }
 
+export function formatMonitorAlias(source: string): string {
+  const trimmed = String(source || '').trim();
+  if (!trimmed) return '';
+  if (trimmed.length <= 6) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, 3)}*${trimmed.slice(-3)}`;
+}
+
+function collectAuthFileDerivedAliases(name?: string): string[] {
+  const aliases = new Set<string>();
+  const normalizedName = String(name ?? '').trim();
+  const nameWithoutExt = normalizedName.replace(/\.[^/.]+$/, '').trim();
+
+  if (normalizedName) {
+    aliases.add(normalizedName);
+    aliases.add(maskSecret(normalizedName));
+  }
+
+  if (nameWithoutExt) {
+    aliases.add(nameWithoutExt);
+    aliases.add(maskSecret(nameWithoutExt));
+    aliases.add(formatMonitorAlias(nameWithoutExt));
+    aliases.add(formatGeminiSource(nameWithoutExt));
+  }
+
+  if (nameWithoutExt.includes('@')) {
+    let localPart = nameWithoutExt.split('@')[0]?.trim() || '';
+    const knownPrefixes = [
+      'codex-',
+      'gemini-',
+      'gemini-cli-',
+      'claude-',
+      'vertex-',
+      'antigravity-',
+      'iflow-',
+      'aistudio-',
+      'qwen-',
+      'kiro-',
+      'kimi-',
+    ];
+    const lowerLocalPart = localPart.toLowerCase();
+    const matchedPrefix = knownPrefixes.find((prefix) => lowerLocalPart.startsWith(prefix));
+    if (matchedPrefix) {
+      localPart = localPart.slice(matchedPrefix.length).trim();
+    }
+    if (localPart) {
+      aliases.add(localPart);
+      aliases.add(maskSecret(localPart));
+      aliases.add(formatMonitorAlias(localPart));
+    }
+  }
+
+  return Array.from(aliases);
+}
+
 /**
  * 检查是否是 Gemini OAuth 类型的来源
  * @param source 来源标识
@@ -213,6 +270,52 @@ export function getProviderDisplayParts(
   const provider = resolveProvider(source, providerMap);
   const masked = maskSecret(source);
   return { provider, masked };
+}
+
+export interface MonitorResolvedSourceAction {
+  actionSourceKey: string;
+  meta?: MonitorSourceMeta;
+}
+
+export function resolveMonitorSourceAction(
+  source: string,
+  sourceMetaMap: Record<string, MonitorSourceMeta>,
+  authIndexMap?: Record<string, string>,
+  authIndex?: string,
+  sourceAuthMap?: Record<string, string>
+): MonitorResolvedSourceAction {
+  const sourceKey = String(source || '').trim();
+  if (sourceKey && sourceMetaMap[sourceKey]) {
+    return { actionSourceKey: sourceKey, meta: sourceMetaMap[sourceKey] };
+  }
+
+  if (sourceKey && sourceAuthMap) {
+    const mappedSourceKey = String(sourceAuthMap[sourceKey] || '').trim();
+    if (mappedSourceKey && sourceMetaMap[mappedSourceKey]) {
+      return { actionSourceKey: mappedSourceKey, meta: sourceMetaMap[mappedSourceKey] };
+    }
+  }
+
+  const authIndexKey = String(authIndex || '').trim();
+  if (authIndexKey && authIndexMap) {
+    const authSourceKey = String(authIndexMap[authIndexKey] || '').trim();
+    if (authSourceKey && sourceMetaMap[authSourceKey]) {
+      return { actionSourceKey: authSourceKey, meta: sourceMetaMap[authSourceKey] };
+    }
+  }
+
+  if (sourceKey) {
+    const matchedEntry = Object.entries(sourceMetaMap).find(([, meta]) => {
+      if (!meta?.authFileName) return false;
+      return collectAuthFileDerivedAliases(meta.authFileName).includes(sourceKey);
+    });
+    if (matchedEntry) {
+      const [matchedKey, matchedMeta] = matchedEntry;
+      return { actionSourceKey: matchedKey, meta: matchedMeta };
+    }
+  }
+
+  return { actionSourceKey: '', meta: undefined };
 }
 
 /**

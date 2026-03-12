@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { useThemeStore } from '@/stores';
-import { providersApi, authFilesApi } from '@/services/api';
+import { providersApi, authFilesApi, monitorApi } from '@/services/api';
 import { KpiCards } from '@/components/monitor/KpiCards';
 import { ModelDistributionChart } from '@/components/monitor/ModelDistributionChart';
 import { DailyTrendChart } from '@/components/monitor/DailyTrendChart';
@@ -30,7 +30,12 @@ import { FailureAnalysis } from '@/components/monitor/FailureAnalysis';
 import { RequestLogs } from '@/components/monitor/RequestLogs';
 import { ServiceHealthCard } from '@/components/monitor/ServiceHealthCard';
 import { hasDisableAllModelsRule } from '@/components/providers/utils';
-import type { MonitorSourceMeta } from '@/utils/monitor';
+import {
+  formatGeminiSource,
+  formatMonitorAlias,
+  getProviderDisplayParts,
+  type MonitorSourceMeta,
+} from '@/utils/monitor';
 import { buildCandidateUsageSourceIds } from '@/utils/usage';
 import { maskApiKey } from '@/utils/format';
 import styles from './MonitorPage.module.scss';
@@ -102,6 +107,62 @@ const collectSourceAliases = (input: {
   return Array.from(aliases);
 };
 
+const collectAuthFileAliases = (name?: string, authIndex?: string) => {
+  const aliases = new Set<string>();
+  const normalizedName = String(name ?? '').trim();
+  const normalizedAuthIndex = String(authIndex ?? '').trim();
+  const nameWithoutExt = normalizedName.replace(/\.[^/.]+$/, '').trim();
+  const emailLocalPartBase = (() => {
+    if (!nameWithoutExt.includes('@')) return '';
+    let localPart = nameWithoutExt.split('@')[0]?.trim() || '';
+    const knownPrefixes = [
+      'codex-',
+      'gemini-',
+      'gemini-cli-',
+      'claude-',
+      'vertex-',
+      'antigravity-',
+      'iflow-',
+      'aistudio-',
+      'qwen-',
+      'kiro-',
+      'kimi-',
+    ];
+    const lowerLocalPart = localPart.toLowerCase();
+    const matchedPrefix = knownPrefixes.find((prefix) => lowerLocalPart.startsWith(prefix));
+    if (matchedPrefix) {
+      localPart = localPart.slice(matchedPrefix.length).trim();
+    }
+    return localPart;
+  })();
+
+  if (normalizedName) {
+    aliases.add(normalizedName);
+    aliases.add(maskApiKey(normalizedName));
+    aliases.add(getProviderDisplayParts(normalizedName, {}).masked);
+  }
+
+  if (nameWithoutExt) {
+    aliases.add(nameWithoutExt);
+    aliases.add(maskApiKey(nameWithoutExt));
+    aliases.add(formatMonitorAlias(nameWithoutExt));
+    aliases.add(formatGeminiSource(nameWithoutExt));
+    aliases.add(getProviderDisplayParts(nameWithoutExt, {}).masked);
+  }
+
+  if (emailLocalPartBase) {
+    aliases.add(emailLocalPartBase);
+    aliases.add(maskApiKey(emailLocalPartBase));
+    aliases.add(formatMonitorAlias(emailLocalPartBase));
+  }
+
+  if (normalizedAuthIndex) {
+    aliases.add(normalizedAuthIndex);
+  }
+
+  return Array.from(aliases);
+};
+
 export function MonitorPage() {
   const { t } = useTranslation();
   const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
@@ -116,6 +177,7 @@ export function MonitorPage() {
   const [providerMap, setProviderMap] = useState<Record<string, string>>({});
   const [providerTypeMap, setProviderTypeMap] = useState<Record<string, string>>({});
   const [authIndexMap, setAuthIndexMap] = useState<Record<string, string>>({});
+  const [sourceAuthMap, setSourceAuthMap] = useState<Record<string, string>>({});
   const [sourceMetaMap, setSourceMetaMap] = useState<Record<string, MonitorSourceMeta>>({});
 
   // 加载渠道名称映射（支持所有提供商类型）
@@ -140,19 +202,24 @@ export function MonitorPage() {
             typeMap[key] = providerType;
           }
           if (!(key in sourceMeta)) {
-            sourceMeta[key] = { ...meta, source: key };
+            sourceMeta[key] = {
+              ...meta,
+              source: key,
+              canonicalSource: meta.canonicalSource || meta.source,
+            };
           }
         });
       };
 
       // 并行加载所有提供商配置
-      const [openaiProviders, geminiKeys, claudeConfigs, codexConfigs, vertexConfigs, authFilesRes] = await Promise.all([
+      const [openaiProviders, geminiKeys, claudeConfigs, codexConfigs, vertexConfigs, authFilesRes, requestLogsRes] = await Promise.all([
         providersApi.getOpenAIProviders().catch(() => []),
         providersApi.getGeminiKeys().catch(() => []),
         providersApi.getClaudeConfigs().catch(() => []),
         providersApi.getCodexConfigs().catch(() => []),
         providersApi.getVertexConfigs().catch(() => []),
         authFilesApi.list().catch(() => ({ files: [] })),
+        monitorApi.getRequestLogs({ page: 1, page_size: 500 }).catch(() => ({ items: [] })),
       ]);
 
       // 处理 OpenAI 兼容提供商
@@ -165,6 +232,7 @@ export function MonitorPage() {
         });
         registerSourceMeta(providerAliases, providerName, 'OpenAI', {
           source: provider.prefix?.trim() || provider.name || providerName,
+          canonicalSource: provider.prefix?.trim() || provider.name || providerName,
           kind: 'openai',
           providerType: 'OpenAI',
           disabled: hasDisableAllModelsRule(provider.excludedModels),
@@ -178,6 +246,7 @@ export function MonitorPage() {
           if (apiKey) {
             registerSourceMeta(collectSourceAliases({ apiKey }), providerName, 'OpenAI', {
               source: apiKey,
+              canonicalSource: provider.prefix?.trim() || provider.name || apiKey,
               kind: 'openai',
               providerType: 'OpenAI',
               disabled: hasDisableAllModelsRule(provider.excludedModels),
@@ -197,6 +266,7 @@ export function MonitorPage() {
           const providerName = config.prefix?.trim() || 'Gemini';
           registerSourceMeta(collectSourceAliases({ apiKey, prefix: config.prefix }), providerName, 'Gemini', {
             source: apiKey,
+            canonicalSource: apiKey,
             kind: 'gemini',
             providerType: 'Gemini',
             disabled: hasDisableAllModelsRule(config.excludedModels),
@@ -215,6 +285,7 @@ export function MonitorPage() {
           const providerName = config.prefix?.trim() || 'Claude';
           registerSourceMeta(collectSourceAliases({ apiKey, prefix: config.prefix }), providerName, 'Claude', {
             source: apiKey,
+            canonicalSource: apiKey,
             kind: 'claude',
             providerType: 'Claude',
             disabled: hasDisableAllModelsRule(config.excludedModels),
@@ -233,6 +304,7 @@ export function MonitorPage() {
           const providerName = config.prefix?.trim() || 'Codex';
           registerSourceMeta(collectSourceAliases({ apiKey, prefix: config.prefix }), providerName, 'Codex', {
             source: apiKey,
+            canonicalSource: apiKey,
             kind: 'codex',
             providerType: 'Codex',
             disabled: hasDisableAllModelsRule(config.excludedModels),
@@ -251,6 +323,7 @@ export function MonitorPage() {
           const providerName = config.prefix?.trim() || 'Vertex';
           registerSourceMeta(collectSourceAliases({ apiKey, prefix: config.prefix }), providerName, 'Vertex', {
             source: apiKey,
+            canonicalSource: apiKey,
             kind: 'vertex',
             providerType: 'Vertex',
             disabled: hasDisableAllModelsRule(config.excludedModels),
@@ -277,15 +350,20 @@ export function MonitorPage() {
       };
       const authFiles = authFilesRes?.files || [];
       const authIdxMap: Record<string, string> = {};
+      const nextSourceAuthMap: Record<string, string> = {};
       authFiles.forEach((file) => {
         const name = file.name;
         if (!name) return;
         const fileType = file.type || 'unknown';
         const providerName = authTypeToProvider[fileType] || fileType;
-        map[name] = providerName;
-        typeMap[name] = providerName;
-        sourceMeta[name] = {
+        const rawAuthIndex = (file as Record<string, unknown>)['auth_index'] ?? file.authIndex;
+        const authIndexKey =
+          rawAuthIndex !== undefined && rawAuthIndex !== null
+            ? String(rawAuthIndex).trim()
+            : '';
+        registerSourceMeta(collectAuthFileAliases(name, authIndexKey), providerName, providerName, {
           source: name,
+          canonicalSource: name,
           kind: 'auth-file',
           providerType: providerName,
           disabled: Boolean(file.disabled),
@@ -294,19 +372,28 @@ export function MonitorPage() {
           editPath: '/auth-files',
           authFileName: name,
           summary: name,
-        };
-        const rawAuthIndex = (file as Record<string, unknown>)['auth_index'] ?? file.authIndex;
+        });
         if (rawAuthIndex !== undefined && rawAuthIndex !== null) {
-          const authIndexKey = String(rawAuthIndex).trim();
           if (authIndexKey) {
             authIdxMap[authIndexKey] = name;
           }
         }
       });
 
+      (requestLogsRes?.items || []).forEach((item) => {
+        const source = String(item?.source || '').trim();
+        const authIndexKey = String(item?.auth_index || '').trim();
+        const authFileName = authIdxMap[authIndexKey] || '';
+        if (!source || !authFileName) return;
+        if (!(source in nextSourceAuthMap)) {
+          nextSourceAuthMap[source] = authFileName;
+        }
+      });
+
       setProviderMap(map);
       setProviderTypeMap(typeMap);
       setAuthIndexMap(authIdxMap);
+      setSourceAuthMap(nextSourceAuthMap);
       setSourceMetaMap(sourceMeta);
     } catch (err) {
       console.warn('Monitor: Failed to load provider map:', err);
@@ -441,6 +528,7 @@ export function MonitorPage() {
           refreshKey={refreshKey}
           loading={loading}
           providerMap={providerMap}
+          sourceAuthMap={sourceAuthMap}
           sourceMetaMap={sourceMetaMap}
           onSourceChanged={loadData}
         />
@@ -448,6 +536,7 @@ export function MonitorPage() {
           refreshKey={refreshKey}
           loading={loading}
           providerMap={providerMap}
+          sourceAuthMap={sourceAuthMap}
           sourceMetaMap={sourceMetaMap}
           onSourceChanged={loadData}
         />
@@ -461,6 +550,7 @@ export function MonitorPage() {
         providerTypeMap={providerTypeMap}
         apiFilter={apiFilter}
         authIndexMap={authIndexMap}
+        sourceAuthMap={sourceAuthMap}
         sourceMetaMap={sourceMetaMap}
         onSourceChanged={loadData}
       />
