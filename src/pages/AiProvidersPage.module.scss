@@ -1405,65 +1405,81 @@
 }
 
 // 暗色主题适配
-:global([data-theme='dark']) {
-  .headerBadge {
+.headerBadge {
+  :global([data-theme='dark']) & {
     background: rgba($primary-color, 0.14);
     border-color: rgba($primary-color, 0.35);
     color: var(--text-secondary);
-
-    strong {
-      color: var(--text-secondary);
-    }
   }
 
-  .modelTag {
+  :global([data-theme='dark']) & strong {
+    color: var(--text-secondary);
+  }
+}
+
+.modelTag {
+  :global([data-theme='dark']) & {
     background: rgba($primary-color, 0.1);
     border-color: var(--border-secondary);
   }
+}
 
-  .excludedModelTag {
+.excludedModelTag {
+  :global([data-theme='dark']) & {
     background: rgba($warning-color, 0.22);
     border-color: rgba($warning-color, 0.55);
     color: var(--warning-color);
-
-    .modelName {
-      color: var(--warning-color);
-    }
   }
 
-  .excludedModelsLabel {
+  :global([data-theme='dark']) & .modelName {
     color: var(--warning-color);
   }
+}
 
-  .statusBlockIdle {
+.excludedModelsLabel {
+  :global([data-theme='dark']) & {
+    color: var(--warning-color);
+  }
+}
+
+.statusBlockIdle {
+  :global([data-theme='dark']) & {
     background-color: var(--border-primary, #374151);
   }
+}
 
-  .statusTooltip {
+.statusTooltip {
+  :global([data-theme='dark']) & {
     background: var(--bg-secondary, #1f2937);
     border-color: var(--border-primary, #374151);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-
-    &::after {
-      border-top-color: var(--bg-secondary, #1f2937);
-    }
-
-    &::before {
-      border-top-color: var(--border-primary, #374151);
-    }
   }
 
-  .statusRateHigh {
+  :global([data-theme='dark']) &::after {
+    border-top-color: var(--bg-secondary, #1f2937);
+  }
+
+  :global([data-theme='dark']) &::before {
+    border-top-color: var(--border-primary, #374151);
+  }
+}
+
+.statusRateHigh {
+  :global([data-theme='dark']) & {
     background: rgba(34, 197, 94, 0.2);
     color: #86efac;
   }
+}
 
-  .statusRateMedium {
+.statusRateMedium {
+  :global([data-theme='dark']) & {
     background: rgba(251, 191, 36, 0.2);
     color: #fde68a;
   }
+}
 
-  .statusRateLow {
+.statusRateLow {
+  :global([data-theme='dark']) & {
     background: rgba($error-color, 0.2);
     color: #fca5a5;
   }
