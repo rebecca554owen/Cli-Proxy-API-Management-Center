@@ -17,6 +17,7 @@ import type { MonitorSourceMeta } from '@/utils/monitor';
 import { formatGeminiSource, formatMonitorAlias, getProviderDisplayParts } from '@/utils/monitor';
 import { buildCandidateUsageSourceIds } from '@/utils/usage';
 import { maskApiKey } from '@/utils/format';
+import { maskSecret } from '@/utils/monitor';
 
 interface MonitorProviderMeta {
   providerMap: Record<string, string>;
@@ -194,9 +195,11 @@ const collectAuthFileAliases = (name?: string, authIndex?: string) => {
   const normalizedName = String(name ?? '').trim();
   const normalizedAuthIndex = String(authIndex ?? '').trim();
   const nameWithoutExt = normalizedName.replace(/\.[^/.]+$/, '').trim();
-  const emailLocalPartBase = (() => {
-    if (!nameWithoutExt.includes('@')) return '';
-    let localPart = nameWithoutExt.split('@')[0]?.trim() || '';
+  const emailAliasParts = (() => {
+    if (!nameWithoutExt.includes('@')) return { localPart: '', email: '' };
+    const [rawLocalPart = '', rawDomain = ''] = nameWithoutExt.split('@');
+    let localPart = rawLocalPart.trim();
+    const domain = rawDomain.trim();
     const knownPrefixes = [
       'codex-',
       'gemini-',
@@ -215,27 +218,40 @@ const collectAuthFileAliases = (name?: string, authIndex?: string) => {
     if (matchedPrefix) {
       localPart = localPart.slice(matchedPrefix.length).trim();
     }
-    return localPart;
+    const email = localPart && domain ? `${localPart}@${domain}` : '';
+    return { localPart, email };
   })();
 
   if (normalizedName) {
     aliases.add(normalizedName);
     aliases.add(maskApiKey(normalizedName));
+    aliases.add(maskSecret(normalizedName));
     aliases.add(getProviderDisplayParts(normalizedName, {}).masked);
   }
 
   if (nameWithoutExt) {
     aliases.add(nameWithoutExt);
     aliases.add(maskApiKey(nameWithoutExt));
+    aliases.add(maskSecret(nameWithoutExt));
     aliases.add(formatMonitorAlias(nameWithoutExt));
     aliases.add(formatGeminiSource(nameWithoutExt));
     aliases.add(getProviderDisplayParts(nameWithoutExt, {}).masked);
   }
 
-  if (emailLocalPartBase) {
-    aliases.add(emailLocalPartBase);
-    aliases.add(maskApiKey(emailLocalPartBase));
-    aliases.add(formatMonitorAlias(emailLocalPartBase));
+  if (emailAliasParts.localPart) {
+    aliases.add(emailAliasParts.localPart);
+    aliases.add(maskApiKey(emailAliasParts.localPart));
+    aliases.add(maskSecret(emailAliasParts.localPart));
+    aliases.add(formatMonitorAlias(emailAliasParts.localPart));
+  }
+
+  if (emailAliasParts.email) {
+    aliases.add(emailAliasParts.email);
+    aliases.add(maskApiKey(emailAliasParts.email));
+    aliases.add(maskSecret(emailAliasParts.email));
+    aliases.add(formatMonitorAlias(emailAliasParts.email));
+    aliases.add(formatGeminiSource(emailAliasParts.email));
+    aliases.add(getProviderDisplayParts(emailAliasParts.email, {}).masked);
   }
 
   if (normalizedAuthIndex) {
@@ -409,6 +425,7 @@ const buildProviderMeta = async (): Promise<MonitorProviderMeta> => {
   };
   const authFiles = authFilesRes?.files || [];
   const authIdxMap: Record<string, string> = {};
+  const nextSourceAuthMap: Record<string, string> = {};
   authFiles.forEach((file) => {
     const name = file.name;
     if (!name) return;
@@ -419,7 +436,8 @@ const buildProviderMeta = async (): Promise<MonitorProviderMeta> => {
       rawAuthIndex !== undefined && rawAuthIndex !== null
         ? String(rawAuthIndex).trim()
         : '';
-    registerSourceMeta(collectAuthFileAliases(name, authIndexKey), providerName, providerName, {
+    const aliases = collectAuthFileAliases(name, authIndexKey);
+    registerSourceMeta(aliases, providerName, providerName, {
       source: name,
       canonicalSource: name,
       kind: 'auth-file',
@@ -431,6 +449,12 @@ const buildProviderMeta = async (): Promise<MonitorProviderMeta> => {
       authFileName: name,
       summary: name,
     });
+    aliases.forEach((alias) => {
+      const key = String(alias || '').trim();
+      if (key && !(key in nextSourceAuthMap)) {
+        nextSourceAuthMap[key] = name;
+      }
+    });
     if (authIndexKey) {
       authIdxMap[authIndexKey] = name;
     }
@@ -440,7 +464,7 @@ const buildProviderMeta = async (): Promise<MonitorProviderMeta> => {
     providerMap: map,
     providerTypeMap: typeMap,
     authIndexMap: authIdxMap,
-    sourceAuthMap: {},
+    sourceAuthMap: nextSourceAuthMap,
     sourceMetaMap: sourceMeta,
   };
 };

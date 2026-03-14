@@ -24,6 +24,26 @@ export interface MonitorRecentRequest {
   timestamp: string;
 }
 
+export interface MonitorSourceRef {
+  entity_id: string;
+  entity_kind: string;
+  kind: string;
+  provider_type: string;
+  auth_index?: string;
+  config_index?: number;
+  config_path?: string;
+  canonical_source: string;
+  display_name: string;
+  display_secret: string;
+  disabled: boolean;
+  can_copy: boolean;
+  can_edit: boolean;
+  can_toggle: boolean;
+  copy_value?: string;
+  edit_path?: string;
+  auth_file_name?: string;
+}
+
 export interface MonitorRequestLogsQuery extends MonitorTimeRangeQuery {
   page?: number;
   page_size?: number;
@@ -47,6 +67,7 @@ export interface MonitorRequestLogItem {
   api_key: string;
   model: string;
   source: string;
+  source_ref?: MonitorSourceRef;
   auth_index: string;
   failed: boolean;
   input_tokens: number;
@@ -97,6 +118,7 @@ export interface MonitorModelStatsItem {
 
 export interface MonitorChannelStatsItem {
   source: string;
+  source_ref?: MonitorSourceRef;
   total_requests: number;
   success_requests: number;
   failed_requests: number;
@@ -119,6 +141,7 @@ export interface MonitorChannelStatsResponse {
 
 export interface MonitorFailureStatsItem {
   source: string;
+  source_ref?: MonitorSourceRef;
   failed_count: number;
   last_failed_at?: string;
   models: MonitorModelStatsItem[];

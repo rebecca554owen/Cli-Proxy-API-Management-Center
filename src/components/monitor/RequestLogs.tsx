@@ -15,6 +15,7 @@ import {
   getProviderDisplayParts,
   buildMonitorTimeRangeParams,
   formatCompactTokenNumber,
+  monitorSourceRefToMeta,
   resolveMonitorSourceAction,
   type DateRange,
   type MonitorSourceMeta,
@@ -51,6 +52,7 @@ interface LogEntry {
   successRate: number;
   recentRequests: { failed: boolean; timestamp: number }[];
   authIndex: string;
+  sourceRef?: MonitorRequestLogItem['source_ref'];
 }
 
 const ROW_HEIGHT = 40;
@@ -86,11 +88,6 @@ export function RequestLogs({
   const [pageSize, setPageSize] = useState(20);
   const ensureRequestLogs = useMonitorStore((state) => state.ensureRequestLogs);
 
-  const { pendingSource, copySourceValue, toggleSource, isSourceDisabled } = useMonitorChannelActions({
-    sourceMetaMap,
-    onChanged: onSourceChanged,
-  });
-
   const handleScroll = useCallback(() => {
     if (tableContainerRef.current && headerRef.current) {
       headerRef.current.scrollLeft = tableContainerRef.current.scrollLeft;
@@ -106,7 +103,10 @@ export function RequestLogs({
   const toLogEntry = useCallback(
     (item: MonitorRequestLogItem, index: number): LogEntry => {
       const source = item.source || 'unknown';
-      const { provider, masked } = getProviderDisplayParts(source, providerMap);
+      const sourceRef = item.source_ref;
+      const fallbackDisplay = getProviderDisplayParts(source, providerMap);
+      const provider = sourceRef?.display_name || fallbackDisplay.provider;
+      const masked = sourceRef?.display_secret || fallbackDisplay.masked;
       const timestampMs = item.timestamp ? new Date(item.timestamp).getTime() : 0;
       return {
         id: `${item.timestamp}-${item.api_key}-${item.model}-${index}`,
@@ -116,7 +116,7 @@ export function RequestLogs({
         model: item.model,
         source,
         providerName: provider,
-        providerType: providerTypeMap[source] || '--',
+        providerType: sourceRef?.provider_type || providerTypeMap[source] || '--',
         maskedKey: masked,
         failed: item.failed,
         inputTokens: item.input_tokens || 0,
@@ -129,6 +129,7 @@ export function RequestLogs({
           timestamp: req.timestamp ? new Date(req.timestamp).getTime() : 0,
         })),
         authIndex: item.auth_index || '',
+        sourceRef,
       };
     },
     [providerMap, providerTypeMap]
@@ -149,6 +150,20 @@ export function RequestLogs({
   );
   const cacheKey = useMemo(() => serializeMonitorParams(params), [params]);
   const entry = useMonitorStore((state) => state.requestLogsCache[cacheKey]);
+  const actionSourceMetaMap = useMemo(() => {
+    const nextMap = { ...sourceMetaMap };
+    (entry?.data?.items || []).forEach((item) => {
+      const meta = monitorSourceRefToMeta(item.source_ref);
+      if (meta?.source) {
+        nextMap[meta.source] = meta;
+      }
+    });
+    return nextMap;
+  }, [entry?.data?.items, sourceMetaMap]);
+  const { pendingSource, toggleSource, isSourceDisabled } = useMonitorChannelActions({
+    sourceMetaMap: actionSourceMetaMap,
+    onChanged: onSourceChanged,
+  });
   const fetchLogData = useCallback(
     async (force = false) => {
       await ensureRequestLogs(params, force);
@@ -264,13 +279,18 @@ export function RequestLogs({
     const authDisplayName = entry.authIndex
       ? authIndexMap[entry.authIndex] || entry.authIndex
       : '-';
-    const { actionSourceKey, meta: sourceMeta } = resolveMonitorSourceAction(
-      entry.source,
-      sourceMetaMap,
-      authIndexMap,
-      entry.authIndex,
-      sourceAuthMap
-    );
+    const directMeta = monitorSourceRefToMeta(entry.sourceRef);
+    const resolvedAction = directMeta
+      ? { actionSourceKey: directMeta.source, meta: directMeta }
+      : resolveMonitorSourceAction(
+        entry.source,
+        actionSourceMetaMap,
+        authIndexMap,
+        entry.authIndex,
+        sourceAuthMap,
+        providerMap
+      );
+    const { actionSourceKey, meta: sourceMeta } = resolvedAction;
     const disabled = actionSourceKey ? isSourceDisabled(actionSourceKey) : false;
 
     return (
@@ -325,12 +345,6 @@ export function RequestLogs({
         <td>{formatTimestamp(entry.timestamp)}</td>
         <td>
           <div className={styles.tableActions}>
-            <button
-              className={styles.actionBtn}
-              onClick={() => void copySourceValue(actionSourceKey || entry.source)}
-            >
-              {t('common.copy')}
-            </button>
             {actionSourceKey && sourceMeta?.canToggle && (
               <button
                 className={disabled ? styles.enableBtn : styles.disableBtn}

@@ -11,6 +11,7 @@ import {
   getRateClassName,
   getProviderDisplayParts,
   buildMonitorTimeRangeParams,
+  monitorSourceRefToMeta,
   resolveMonitorSourceAction,
   type DateRange,
   type MonitorSourceMeta,
@@ -43,6 +44,7 @@ interface FailureStat {
   failedCount: number;
   lastFailTime: number;
   models: Record<string, ModelFailureStat>;
+  sourceRef?: MonitorFailureStatsItem['source_ref'];
 }
 
 export function FailureAnalysis({
@@ -62,12 +64,6 @@ export function FailureAnalysis({
   const [customRange, setCustomRange] = useState<DateRange | undefined>();
   const ensureFailureAnalysis = useMonitorStore((state) => state.ensureFailureAnalysis);
 
-  const { pendingSource, copySourceValue, openEditor, toggleSource, isSourceDisabled } =
-    useMonitorChannelActions({
-      sourceMetaMap,
-      onChanged: onSourceChanged,
-    });
-
   const handleTimeRangeChange = useCallback((range: TimeRange, custom?: DateRange) => {
     setTimeRange(range);
     setCustomRange(custom);
@@ -81,7 +77,9 @@ export function FailureAnalysis({
 
   const mapFailureStat = useCallback((item: MonitorFailureStatsItem): FailureStat => {
     const source = item.source || 'unknown';
-    const { provider, masked } = getProviderDisplayParts(source, providerMap);
+    const fallbackDisplay = getProviderDisplayParts(source, providerMap);
+    const provider = item.source_ref?.display_name || fallbackDisplay.provider;
+    const masked = item.source_ref?.display_secret || fallbackDisplay.masked;
     const displayName = provider ? `${provider} (${masked})` : masked;
 
     const models: Record<string, ModelFailureStat> = {};
@@ -107,6 +105,7 @@ export function FailureAnalysis({
       failedCount: item.failed_count || 0,
       lastFailTime: item.last_failed_at ? new Date(item.last_failed_at).getTime() : 0,
       models,
+      sourceRef: item.source_ref,
     };
   }, [providerMap]);
 
@@ -121,6 +120,21 @@ export function FailureAnalysis({
   );
   const cacheKey = useMemo(() => serializeMonitorParams(params), [params]);
   const entry = useMonitorStore((state) => state.failureAnalysisCache[cacheKey]);
+  const actionSourceMetaMap = useMemo(() => {
+    const nextMap = { ...sourceMetaMap };
+    (entry?.data?.items || []).forEach((item) => {
+      const meta = monitorSourceRefToMeta(item.source_ref);
+      if (meta?.source) {
+        nextMap[meta.source] = meta;
+      }
+    });
+    return nextMap;
+  }, [entry?.data?.items, sourceMetaMap]);
+  const { pendingSource, copySourceValue, openEditor, toggleSource, isSourceDisabled } =
+    useMonitorChannelActions({
+      sourceMetaMap: actionSourceMetaMap,
+      onChanged: onSourceChanged,
+    });
 
   useEffect(() => {
     void ensureFailureAnalysis(params, refreshKey > 0);
@@ -239,15 +253,20 @@ export function FailureAnalysis({
               </thead>
               <tbody>
                 {filteredStats.map((stat) => {
-                  const resolvedAction = resolveMonitorSourceAction(
-                    stat.source,
-                    sourceMetaMap,
-                    undefined,
-                    undefined,
-                    sourceAuthMap
-                  );
+                  const directMeta = monitorSourceRefToMeta(stat.sourceRef);
+                  const resolvedAction = directMeta
+                    ? { actionSourceKey: directMeta.source, meta: directMeta }
+                    : resolveMonitorSourceAction(
+                      stat.source,
+                      actionSourceMetaMap,
+                      undefined,
+                      undefined,
+                      sourceAuthMap,
+                      providerMap
+                    );
                   const actionSourceKey = resolvedAction.actionSourceKey;
                   const sourceMeta = resolvedAction.meta;
+                  const hasActions = Boolean(actionSourceKey && sourceMeta);
                   const disabled = actionSourceKey ? isSourceDisabled(actionSourceKey) : false;
                   const topModels = getTopFailedModels(stat.source, stat.models);
                   const totalFailedModels = Object.values(stat.models).filter((m) => m.failure > 0).length;
@@ -297,21 +316,23 @@ export function FailureAnalysis({
                         </td>
                         <td onClick={(e) => e.stopPropagation()}>
                           <div className={styles.tableActions}>
-                            <button
-                              className={styles.actionBtn}
-                              onClick={() => void copySourceValue(actionSourceKey || stat.source)}
-                            >
-                              {t('common.copy')}
-                            </button>
-                            {sourceMeta?.editPath && (
+                            {hasActions && (
                               <button
                                 className={styles.actionBtn}
-                                onClick={() => openEditor(actionSourceKey || stat.source)}
+                                onClick={() => void copySourceValue(actionSourceKey)}
+                              >
+                                {t('common.copy')}
+                              </button>
+                            )}
+                            {hasActions && sourceMeta?.editPath && (
+                              <button
+                                className={styles.actionBtn}
+                                onClick={() => openEditor(actionSourceKey)}
                               >
                                 {t('common.edit')}
                               </button>
                             )}
-                            {sourceMeta?.canToggle && actionSourceKey && (
+                            {hasActions && sourceMeta?.canToggle && (
                               <button
                                 className={disabled ? styles.enableBtn : styles.disableBtn}
                                 onClick={() => void toggleSource(actionSourceKey)}

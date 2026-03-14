@@ -3,6 +3,7 @@
  */
 
 import type { MonitorTimeRangeQuery } from '@/services/api/monitor';
+import { maskApiKey } from './format';
 
 /**
  * 日期范围接口
@@ -77,6 +78,50 @@ export interface MonitorSourceMeta {
   authFileName?: string;
   configIndex?: number;
   summary?: string;
+}
+
+export interface MonitorSourceRef {
+  entity_id: string;
+  entity_kind: string;
+  kind: string;
+  provider_type: string;
+  auth_index?: string;
+  config_index?: number;
+  config_path?: string;
+  canonical_source: string;
+  display_name: string;
+  display_secret: string;
+  disabled: boolean;
+  can_copy: boolean;
+  can_edit: boolean;
+  can_toggle: boolean;
+  copy_value?: string;
+  edit_path?: string;
+  auth_file_name?: string;
+}
+
+export function monitorSourceRefToMeta(sourceRef?: MonitorSourceRef): MonitorSourceMeta | undefined {
+  if (!sourceRef?.entity_id) {
+    return undefined;
+  }
+
+  const kind = (sourceRef.kind || 'unknown') as MonitorSourceKind;
+  return {
+    source: sourceRef.entity_id,
+    canonicalSource: sourceRef.canonical_source || sourceRef.entity_id,
+    kind,
+    providerType: sourceRef.provider_type || '',
+    disabled: !!sourceRef.disabled,
+    canToggle: !!sourceRef.can_toggle,
+    copyValue: sourceRef.copy_value || '',
+    editPath: sourceRef.can_edit ? sourceRef.edit_path || undefined : undefined,
+    authFileName: sourceRef.auth_file_name || undefined,
+    configIndex: sourceRef.config_index,
+    summary:
+      sourceRef.display_name && sourceRef.display_secret
+        ? `${sourceRef.display_name} · ${sourceRef.display_secret}`
+        : sourceRef.display_name || sourceRef.display_secret || undefined,
+  };
 }
 
 /**
@@ -172,21 +217,27 @@ function collectAuthFileDerivedAliases(name?: string): string[] {
   const aliases = new Set<string>();
   const normalizedName = String(name ?? '').trim();
   const nameWithoutExt = normalizedName.replace(/\.[^/.]+$/, '').trim();
+  let emailLocalPart = '';
+  let email = '';
 
   if (normalizedName) {
     aliases.add(normalizedName);
     aliases.add(maskSecret(normalizedName));
+    aliases.add(maskApiKey(normalizedName));
   }
 
   if (nameWithoutExt) {
     aliases.add(nameWithoutExt);
     aliases.add(maskSecret(nameWithoutExt));
+    aliases.add(maskApiKey(nameWithoutExt));
     aliases.add(formatMonitorAlias(nameWithoutExt));
     aliases.add(formatGeminiSource(nameWithoutExt));
   }
 
   if (nameWithoutExt.includes('@')) {
-    let localPart = nameWithoutExt.split('@')[0]?.trim() || '';
+    const [rawLocalPart = '', rawDomain = ''] = nameWithoutExt.split('@');
+    let localPart = rawLocalPart.trim();
+    const domain = rawDomain.trim();
     const knownPrefixes = [
       'codex-',
       'gemini-',
@@ -205,11 +256,23 @@ function collectAuthFileDerivedAliases(name?: string): string[] {
     if (matchedPrefix) {
       localPart = localPart.slice(matchedPrefix.length).trim();
     }
-    if (localPart) {
-      aliases.add(localPart);
-      aliases.add(maskSecret(localPart));
-      aliases.add(formatMonitorAlias(localPart));
-    }
+    emailLocalPart = localPart;
+    email = localPart && domain ? `${localPart}@${domain}` : '';
+  }
+
+  if (emailLocalPart) {
+    aliases.add(emailLocalPart);
+    aliases.add(maskSecret(emailLocalPart));
+    aliases.add(maskApiKey(emailLocalPart));
+    aliases.add(formatMonitorAlias(emailLocalPart));
+  }
+
+  if (email) {
+    aliases.add(email);
+    aliases.add(maskSecret(email));
+    aliases.add(maskApiKey(email));
+    aliases.add(formatMonitorAlias(email));
+    aliases.add(formatGeminiSource(email));
   }
 
   return Array.from(aliases);
@@ -282,7 +345,8 @@ export function resolveMonitorSourceAction(
   sourceMetaMap: Record<string, MonitorSourceMeta>,
   authIndexMap?: Record<string, string>,
   authIndex?: string,
-  sourceAuthMap?: Record<string, string>
+  sourceAuthMap?: Record<string, string>,
+  providerMap?: Record<string, string>
 ): MonitorResolvedSourceAction {
   const sourceKey = String(source || '').trim();
   if (sourceKey && sourceMetaMap[sourceKey]) {
@@ -308,6 +372,31 @@ export function resolveMonitorSourceAction(
     const matchedEntry = Object.entries(sourceMetaMap).find(([, meta]) => {
       if (!meta?.authFileName) return false;
       return collectAuthFileDerivedAliases(meta.authFileName).includes(sourceKey);
+    });
+    if (matchedEntry) {
+      const [matchedKey, matchedMeta] = matchedEntry;
+      return { actionSourceKey: matchedKey, meta: matchedMeta };
+    }
+  }
+
+  if (sourceKey && providerMap) {
+    const currentDisplay = getProviderDisplayParts(sourceKey, providerMap);
+    const matchedEntry = Object.entries(sourceMetaMap).find(([metaKey, meta]) => {
+      const candidates = [
+        meta?.authFileName,
+        meta?.canonicalSource,
+        meta?.source,
+        metaKey,
+      ]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
+      return candidates.some((candidate) => {
+        const candidateDisplay = getProviderDisplayParts(candidate, providerMap);
+        return (
+          candidateDisplay.masked === currentDisplay.masked &&
+          (candidateDisplay.provider || '') === (currentDisplay.provider || '')
+        );
+      });
     });
     if (matchedEntry) {
       const [matchedKey, matchedMeta] = matchedEntry;
