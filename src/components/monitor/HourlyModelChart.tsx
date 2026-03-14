@@ -2,7 +2,9 @@ import { useMemo, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Chart } from 'react-chartjs-2';
 import type { TimeRange } from '@/pages/MonitorPage';
-import { monitorApi, type MonitorHourlyModelsData } from '@/services/api/monitor';
+import type { MonitorHourlyModelsData } from '@/services/api/monitor';
+import { useMonitorStore } from '@/stores';
+import { serializeMonitorParams } from '@/stores/useMonitorStore';
 import { buildMonitorTimeRangeParams } from '@/utils/monitor';
 import styles from '@/pages/MonitorPage.module.scss';
 
@@ -10,6 +12,7 @@ interface HourlyModelChartProps {
   timeRange: TimeRange;
   apiFilter: string;
   isDark: boolean;
+  refreshKey: number;
 }
 
 // 颜色调色板
@@ -31,38 +34,28 @@ const EMPTY_DATA: MonitorHourlyModelsData = {
   success_rates: [],
 };
 
-export function HourlyModelChart({ timeRange, apiFilter, isDark }: HourlyModelChartProps) {
+export function HourlyModelChart({ timeRange, apiFilter, isDark, refreshKey }: HourlyModelChartProps) {
   const { t } = useTranslation();
   const [hourRange, setHourRange] = useState<HourRange>(12);
-  const [loading, setLoading] = useState(true);
-  const [hourlyData, setHourlyData] = useState<MonitorHourlyModelsData>(EMPTY_DATA);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-
-    const params = {
+  const ensureHourlyModels = useMonitorStore((state) => state.ensureHourlyModels);
+  const params = useMemo(
+    () => ({
       hours: hourRange,
       limit: 6,
       ...buildMonitorTimeRangeParams(timeRange),
       ...(apiFilter ? { api_filter: apiFilter } : {}),
-    };
+    }),
+    [hourRange, timeRange, apiFilter]
+  );
+  const cacheKey = useMemo(() => serializeMonitorParams(params), [params]);
+  const entry = useMonitorStore((state) => state.hourlyModelsCache[cacheKey]);
 
-    monitorApi.getHourlyModels(params).then((data) => {
-      if (!cancelled) {
-        setHourlyData(data);
-        setLoading(false);
-      }
-    }).catch((err) => {
-      console.error('Hourly models load failed:', err);
-      if (!cancelled) {
-        setHourlyData(EMPTY_DATA);
-        setLoading(false);
-      }
-    });
+  useEffect(() => {
+    void ensureHourlyModels(params, refreshKey > 0);
+  }, [ensureHourlyModels, params, refreshKey]);
 
-    return () => { cancelled = true; };
-  }, [timeRange, apiFilter, hourRange]);
+  const hourlyData: MonitorHourlyModelsData = entry?.data || EMPTY_DATA;
+  const loading = !entry?.data && (entry?.loading ?? true);
 
   // 获取时间范围标签
   const hourRangeLabel = useMemo(() => {

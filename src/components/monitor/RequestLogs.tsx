@@ -2,8 +2,10 @@ import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Card } from '@/components/ui/Card';
-import { monitorApi, type MonitorRequestLogItem } from '@/services/api';
+import type { MonitorRequestLogItem } from '@/services/api';
 import { useMonitorChannelActions } from '@/hooks';
+import { useMonitorStore } from '@/stores';
+import { serializeMonitorParams } from '@/stores/useMonitorStore';
 import { TimeRangeSelector, formatTimeRangeCaption, type TimeRange } from './TimeRangeSelector';
 import {
   maskSecret,
@@ -80,22 +82,9 @@ export function RequestLogs({
 
   const [timeRange, setTimeRange] = useState<TimeRange>(1);
   const [customRange, setCustomRange] = useState<DateRange | undefined>();
-
-  const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
-  const [logLoading, setLogLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [total, setTotal] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
-  const [filterOptions, setFilterOptions] = useState<{
-    apis: string[];
-    models: string[];
-    sources: string[];
-  }>({
-    apis: [],
-    models: [],
-    sources: [],
-  });
+  const ensureRequestLogs = useMonitorStore((state) => state.ensureRequestLogs);
 
   const { pendingSource, copySourceValue, toggleSource, isSourceDisabled } = useMonitorChannelActions({
     sourceMetaMap,
@@ -145,59 +134,30 @@ export function RequestLogs({
     [providerMap, providerTypeMap]
   );
 
-  // 独立获取日志数据
-  const fetchLogData = useCallback(async () => {
-    setLogLoading(true);
-    try {
-      const params = {
-        page,
-        page_size: pageSize,
-        api: filterApi || undefined,
-        api_filter: apiFilter || undefined,
-        model: filterModel || undefined,
-        source: filterSource || undefined,
-        status: filterStatus || undefined,
-        ...buildMonitorTimeRangeParams(timeRange, customRange),
-      };
-
-      const response = await monitorApi.getRequestLogs(params);
-      const items = (response.items || []).map(toLogEntry);
-      setLogEntries(items);
-      setTotal(response.total || 0);
-      setTotalPages(response.total_pages || 0);
-      setFilterOptions((prev) => ({
-        apis: filterApi ? prev.apis : (response.filters?.apis || []),
-        models: filterModel ? prev.models : (response.filters?.models || []),
-        sources: filterSource ? prev.sources : (response.filters?.sources || []),
-      }));
-
-      const safePage = response.page || page;
-      if (safePage !== page) {
-        setPage(safePage);
-      }
-    } catch (err) {
-      console.error('日志刷新失败：', err);
-      setLogEntries([]);
-      setTotal(0);
-      setTotalPages(0);
-    } finally {
-      setLogLoading(false);
-    }
-  }, [
-    page,
-    pageSize,
-    filterApi,
-    apiFilter,
-    filterModel,
-    filterSource,
-    filterStatus,
-    timeRange,
-    customRange,
-    toLogEntry,
-  ]);
+  const params = useMemo(
+    () => ({
+      page,
+      page_size: pageSize,
+      api: filterApi || undefined,
+      api_filter: apiFilter || undefined,
+      model: filterModel || undefined,
+      source: filterSource || undefined,
+      status: filterStatus || undefined,
+      ...buildMonitorTimeRangeParams(timeRange, customRange),
+    }),
+    [page, pageSize, filterApi, apiFilter, filterModel, filterSource, filterStatus, timeRange, customRange]
+  );
+  const cacheKey = useMemo(() => serializeMonitorParams(params), [params]);
+  const entry = useMonitorStore((state) => state.requestLogsCache[cacheKey]);
+  const fetchLogData = useCallback(
+    async (force = false) => {
+      await ensureRequestLogs(params, force);
+    },
+    [ensureRequestLogs, params]
+  );
 
   useEffect(() => {
-    fetchLogDataRef.current = fetchLogData;
+    fetchLogDataRef.current = () => fetchLogData(true);
   }, [fetchLogData]);
 
   useEffect(() => {
@@ -232,8 +192,25 @@ export function RequestLogs({
   }, [autoRefresh]);
 
   useEffect(() => {
-    fetchLogData();
+    void fetchLogData(refreshKey > 0);
   }, [fetchLogData, refreshKey]);
+
+  const response = entry?.data;
+  const logEntries = useMemo(
+    () => (response?.items || []).map(toLogEntry),
+    [response?.items, toLogEntry]
+  );
+  const logLoading = !response && (entry?.loading ?? true);
+  const total = response?.total || 0;
+  const totalPages = response?.total_pages || 0;
+  const filterOptions = useMemo(
+    () => ({
+      apis: response?.filters?.apis || [],
+      models: response?.filters?.models || [],
+      sources: response?.filters?.sources || [],
+    }),
+    [response]
+  );
 
   const providerTypes = useMemo(() => {
     const typeSet = new Set<string>();

@@ -1,8 +1,10 @@
 import { useMemo, useState, useCallback, Fragment, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
-import { monitorApi, type MonitorFailureStatsItem } from '@/services/api';
+import type { MonitorFailureStatsItem } from '@/services/api';
 import { useMonitorChannelActions } from '@/hooks';
+import { useMonitorStore } from '@/stores';
+import { serializeMonitorParams } from '@/stores/useMonitorStore';
 import { TimeRangeSelector, type TimeRange } from './TimeRangeSelector';
 import {
   formatTimestamp,
@@ -43,11 +45,6 @@ interface FailureStat {
   models: Record<string, ModelFailureStat>;
 }
 
-interface ChannelFilterOption {
-  source: string;
-  label: string;
-}
-
 export function FailureAnalysis({
   refreshKey,
   loading,
@@ -63,10 +60,7 @@ export function FailureAnalysis({
 
   const [timeRange, setTimeRange] = useState<TimeRange>(1);
   const [customRange, setCustomRange] = useState<DateRange | undefined>();
-
-  const [failureStats, setFailureStats] = useState<FailureStat[]>([]);
-  const [filters, setFilters] = useState<{ channels: ChannelFilterOption[]; models: string[] }>({ channels: [], models: [] });
-  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const ensureFailureAnalysis = useMonitorStore((state) => state.ensureFailureAnalysis);
 
   const { pendingSource, copySourceValue, openEditor, toggleSource, isSourceDisabled } =
     useMonitorChannelActions({
@@ -116,47 +110,49 @@ export function FailureAnalysis({
     };
   }, [providerMap]);
 
-  const loadFailureAnalysis = useCallback(async () => {
-    setAnalysisLoading(true);
-    try {
-      const response = await monitorApi.getFailureAnalysis({
-        limit: 10,
-        source: filterChannel || undefined,
-        model: filterModel || undefined,
-        ...buildMonitorTimeRangeParams(timeRange, customRange),
-      });
-
-      const mapped = (response.items || []).map(mapFailureStat);
-      setFailureStats(mapped);
-
-      const sourceSet = new Set<string>(
-        (response.filters?.sources && response.filters.sources.length > 0)
-          ? response.filters.sources
-          : mapped.map((stat) => stat.source)
-      );
-      const channels = Array.from(sourceSet)
-        .filter((source) => !!source)
-        .map((source) => ({ source, label: formatChannelLabel(source) }))
-        .sort((a, b) => a.label.localeCompare(b.label, 'zh-Hans-CN'));
-
-      const modelSet = new Set<string>(
-        (response.filters?.models && response.filters.models.length > 0)
-          ? response.filters.models
-          : mapped.flatMap((stat) => Object.keys(stat.models))
-      );
-      setFilters({ channels, models: Array.from(modelSet).sort() });
-    } catch (err) {
-      console.error('失败分析加载失败：', err);
-      setFailureStats([]);
-      setFilters({ channels: [], models: [] });
-    } finally {
-      setAnalysisLoading(false);
-    }
-  }, [filterChannel, filterModel, timeRange, customRange, mapFailureStat, formatChannelLabel]);
+  const params = useMemo(
+    () => ({
+      limit: 10,
+      source: filterChannel || undefined,
+      model: filterModel || undefined,
+      ...buildMonitorTimeRangeParams(timeRange, customRange),
+    }),
+    [filterChannel, filterModel, timeRange, customRange]
+  );
+  const cacheKey = useMemo(() => serializeMonitorParams(params), [params]);
+  const entry = useMonitorStore((state) => state.failureAnalysisCache[cacheKey]);
 
   useEffect(() => {
-    loadFailureAnalysis();
-  }, [loadFailureAnalysis, refreshKey]);
+    void ensureFailureAnalysis(params, refreshKey > 0);
+  }, [ensureFailureAnalysis, params, refreshKey]);
+
+  const failureStats = useMemo(
+    () => (entry?.data?.items || []).map(mapFailureStat),
+    [entry?.data?.items, mapFailureStat]
+  );
+
+  const filters = useMemo(() => {
+    const response = entry?.data;
+    const sourceSet = new Set<string>(
+      response?.filters?.sources && response.filters.sources.length > 0
+        ? response.filters.sources
+        : failureStats.map((stat) => stat.source)
+    );
+    const channels = Array.from(sourceSet)
+      .filter((source) => !!source)
+      .map((source) => ({ source, label: formatChannelLabel(source) }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'zh-Hans-CN'));
+
+    const modelSet = new Set<string>(
+      response?.filters?.models && response.filters.models.length > 0
+        ? response.filters.models
+        : failureStats.flatMap((stat) => Object.keys(stat.models))
+    );
+
+    return { channels, models: Array.from(modelSet).sort() };
+  }, [entry?.data, failureStats, formatChannelLabel]);
+
+  const analysisLoading = !entry?.data && (entry?.loading ?? true);
 
   const filteredStats = useMemo(() => {
     return failureStats.filter((stat) => {

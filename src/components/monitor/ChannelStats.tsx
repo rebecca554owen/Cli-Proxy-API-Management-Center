@@ -1,8 +1,10 @@
 import { useMemo, useState, useCallback, Fragment, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
-import { monitorApi, type MonitorChannelStatsItem } from '@/services/api';
+import type { MonitorChannelStatsItem } from '@/services/api';
 import { useMonitorChannelActions } from '@/hooks';
+import { useMonitorStore } from '@/stores';
+import { serializeMonitorParams } from '@/stores/useMonitorStore';
 import { TimeRangeSelector, type TimeRange } from './TimeRangeSelector';
 import {
   formatTimestamp,
@@ -47,11 +49,6 @@ interface ChannelStat {
   models: Record<string, ModelStat>;
 }
 
-interface ChannelFilterOption {
-  source: string;
-  label: string;
-}
-
 export function ChannelStats({
   refreshKey,
   loading,
@@ -68,10 +65,7 @@ export function ChannelStats({
 
   const [timeRange, setTimeRange] = useState<TimeRange>(1);
   const [customRange, setCustomRange] = useState<DateRange | undefined>();
-
-  const [channelStats, setChannelStats] = useState<ChannelStat[]>([]);
-  const [filters, setFilters] = useState<{ channels: ChannelFilterOption[]; models: string[] }>({ channels: [], models: [] });
-  const [statsLoading, setStatsLoading] = useState(false);
+  const ensureChannelStats = useMonitorStore((state) => state.ensureChannelStats);
 
   const { pendingSource, copySourceValue, openEditor, toggleSource, isSourceDisabled } =
     useMonitorChannelActions({
@@ -128,48 +122,50 @@ export function ChannelStats({
     };
   }, [providerMap]);
 
-  const loadChannelStats = useCallback(async () => {
-    setStatsLoading(true);
-    try {
-      const response = await monitorApi.getChannelStats({
-        limit: 10,
-        source: filterChannel || undefined,
-        status: filterStatus || undefined,
-        model: filterModel || undefined,
-        ...buildMonitorTimeRangeParams(timeRange, customRange),
-      });
-      const mapped = (response.items || []).map(mapChannelStat);
-      setChannelStats(mapped);
-
-      const sourceSet = new Set<string>(
-        (response.filters?.sources && response.filters.sources.length > 0)
-          ? response.filters.sources
-          : mapped.map((stat) => stat.source)
-      );
-      const channels = Array.from(sourceSet)
-        .filter((source) => !!source)
-        .map((source) => ({ source, label: formatChannelLabel(source) }))
-        .sort((a, b) => a.label.localeCompare(b.label, 'zh-Hans-CN'));
-
-      const modelSet = new Set<string>(
-        (response.filters?.models && response.filters.models.length > 0)
-          ? response.filters.models
-          : mapped.flatMap((stat) => Object.keys(stat.models))
-      );
-
-      setFilters({ channels, models: Array.from(modelSet).sort() });
-    } catch (err) {
-      console.error('渠道统计加载失败：', err);
-      setChannelStats([]);
-      setFilters({ channels: [], models: [] });
-    } finally {
-      setStatsLoading(false);
-    }
-  }, [filterChannel, filterStatus, filterModel, timeRange, customRange, mapChannelStat, formatChannelLabel]);
+  const params = useMemo(
+    () => ({
+      limit: 10,
+      source: filterChannel || undefined,
+      status: filterStatus || undefined,
+      model: filterModel || undefined,
+      ...buildMonitorTimeRangeParams(timeRange, customRange),
+    }),
+    [filterChannel, filterStatus, filterModel, timeRange, customRange]
+  );
+  const cacheKey = useMemo(() => serializeMonitorParams(params), [params]);
+  const entry = useMonitorStore((state) => state.channelStatsCache[cacheKey]);
 
   useEffect(() => {
-    loadChannelStats();
-  }, [loadChannelStats, refreshKey]);
+    void ensureChannelStats(params, refreshKey > 0);
+  }, [ensureChannelStats, params, refreshKey]);
+
+  const channelStats = useMemo(
+    () => (entry?.data?.items || []).map(mapChannelStat),
+    [entry?.data?.items, mapChannelStat]
+  );
+
+  const filters = useMemo(() => {
+    const response = entry?.data;
+    const sourceSet = new Set<string>(
+      response?.filters?.sources && response.filters.sources.length > 0
+        ? response.filters.sources
+        : channelStats.map((stat) => stat.source)
+    );
+    const channels = Array.from(sourceSet)
+      .filter((source) => !!source)
+      .map((source) => ({ source, label: formatChannelLabel(source) }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'zh-Hans-CN'));
+
+    const modelSet = new Set<string>(
+      response?.filters?.models && response.filters.models.length > 0
+        ? response.filters.models
+        : channelStats.flatMap((stat) => Object.keys(stat.models))
+    );
+
+    return { channels, models: Array.from(modelSet).sort() };
+  }, [entry?.data, channelStats, formatChannelLabel]);
+
+  const statsLoading = !entry?.data && (entry?.loading ?? true);
 
   const filteredStats = useMemo(() => {
     return channelStats.filter((stat) => {

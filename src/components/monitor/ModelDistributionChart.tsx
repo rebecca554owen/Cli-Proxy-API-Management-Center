@@ -2,7 +2,9 @@ import { useMemo, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Doughnut } from 'react-chartjs-2';
 import type { TimeRange } from '@/pages/MonitorPage';
-import { monitorApi, type MonitorModelDistributionItem } from '@/services/api/monitor';
+import type { MonitorModelDistributionItem } from '@/services/api/monitor';
+import { useMonitorStore } from '@/stores';
+import { serializeMonitorParams } from '@/stores/useMonitorStore';
 import { buildMonitorTimeRangeParams } from '@/utils/monitor';
 import styles from '@/pages/MonitorPage.module.scss';
 
@@ -10,6 +12,7 @@ interface ModelDistributionChartProps {
   timeRange: TimeRange;
   apiFilter: string;
   isDark: boolean;
+  refreshKey: number;
 }
 
 // 颜色调色板
@@ -28,38 +31,28 @@ const COLORS = [
 
 type ViewMode = 'request' | 'token';
 
-export function ModelDistributionChart({ timeRange, apiFilter, isDark }: ModelDistributionChartProps) {
+export function ModelDistributionChart({ timeRange, apiFilter, isDark, refreshKey }: ModelDistributionChartProps) {
   const { t } = useTranslation();
   const [viewMode, setViewMode] = useState<ViewMode>('request');
-  const [loading, setLoading] = useState(true);
-  const [distributionItems, setDistributionItems] = useState<MonitorModelDistributionItem[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-
-    const params = {
+  const ensureModelDistribution = useMonitorStore((state) => state.ensureModelDistribution);
+  const params = useMemo(
+    () => ({
       sort: viewMode === 'request' ? 'requests' as const : 'tokens' as const,
       limit: 10,
       ...buildMonitorTimeRangeParams(timeRange),
       ...(apiFilter ? { api_filter: apiFilter } : {}),
-    };
+    }),
+    [viewMode, timeRange, apiFilter]
+  );
+  const cacheKey = useMemo(() => serializeMonitorParams(params), [params]);
+  const entry = useMonitorStore((state) => state.modelDistributionCache[cacheKey]);
 
-    monitorApi.getModelDistribution(params).then((data) => {
-      if (!cancelled) {
-        setDistributionItems(data.items || []);
-        setLoading(false);
-      }
-    }).catch((err) => {
-      console.error('Model distribution load failed:', err);
-      if (!cancelled) {
-        setDistributionItems([]);
-        setLoading(false);
-      }
-    });
+  useEffect(() => {
+    void ensureModelDistribution(params, refreshKey > 0);
+  }, [ensureModelDistribution, params, refreshKey]);
 
-    return () => { cancelled = true; };
-  }, [timeRange, apiFilter, viewMode]);
+  const distributionItems: MonitorModelDistributionItem[] = entry?.data?.items || [];
+  const loading = !entry?.data && (entry?.loading ?? true);
 
   const timeRangeLabel = (() => {
     if (timeRange === 'yesterday') return t('monitor.yesterday');

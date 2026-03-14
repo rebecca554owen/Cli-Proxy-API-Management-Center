@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { monitorApi, type MonitorServiceHealthData } from '@/services/api/monitor';
+import type { MonitorServiceHealthData } from '@/services/api/monitor';
+import { useMonitorStore } from '@/stores';
 import styles from '@/pages/MonitorPage.module.scss';
 
 const ROWS = 7;
@@ -60,31 +61,20 @@ function buildBlockDetails(data: MonitorServiceHealthData): BlockDetail[] {
   });
 }
 
-export function ServiceHealthCard() {
+interface ServiceHealthCardProps {
+  refreshKey: number;
+}
+
+export function ServiceHealthCard({ refreshKey }: ServiceHealthCardProps) {
   const { t } = useTranslation();
-  const [data, setData] = useState<MonitorServiceHealthData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const ensureServiceHealth = useMonitorStore((state) => state.ensureServiceHealth);
+  const entry = useMonitorStore((state) => state.serviceHealth);
   const [activeTooltip, setActiveTooltip] = useState<number | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(false);
-    monitorApi
-      .getServiceHealth()
-      .then((res) => {
-        if (!cancelled) setData(res);
-      })
-      .catch(() => {
-        if (!cancelled) setError(true);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, []);
+    void ensureServiceHealth(refreshKey > 0);
+  }, [ensureServiceHealth, refreshKey]);
 
   useEffect(() => {
     if (activeTooltip === null) return;
@@ -147,6 +137,9 @@ export function ServiceHealthCard() {
     );
   };
 
+  const data: MonitorServiceHealthData | null = entry.data ?? null;
+  const loading = !data && entry.loading;
+  const error = Boolean(entry.error);
   const blockDetails = data ? buildBlockDetails(data) : [];
   const hasData = data ? data.total_success + data.total_failure > 0 : false;
   const successRate = data?.success_rate ?? 0;
