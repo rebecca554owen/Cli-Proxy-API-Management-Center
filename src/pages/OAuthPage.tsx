@@ -432,6 +432,7 @@ export function OAuthPage() {
                         hint={t('auth_login.gemini_cli_project_id_hint')}
                         value={state.projectId || ''}
                         error={state.projectIdError}
+                        disabled={Boolean(state.polling)}
                         onChange={(e) =>
                           updateProviderState(provider.id, {
                             projectId: e.target.value,
