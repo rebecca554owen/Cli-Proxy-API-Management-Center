@@ -188,14 +188,16 @@ export function ChannelStats({
     });
   }, [channelStats, filterChannel]);
 
-  useEffect(() => {
-    if (expandedChannel && !filteredStats.some((stat) => stat.source === expandedChannel)) {
-      setExpandedChannel(null);
-    }
-  }, [expandedChannel, filteredStats]);
+  const visibleExpandedChannel = useMemo(
+    () =>
+      expandedChannel && filteredStats.some((stat) => stat.source === expandedChannel)
+        ? expandedChannel
+        : null,
+    [expandedChannel, filteredStats]
+  );
 
   const toggleExpand = (source: string) => {
-    setExpandedChannel(expandedChannel === source ? null : source);
+    setExpandedChannel((prev) => (prev === source ? null : source));
   };
 
   return (
@@ -352,7 +354,7 @@ export function ChannelStats({
                         </div>
                       </td>
                     </tr>
-                    {expandedChannel === stat.source && (
+                    {visibleExpandedChannel === stat.source && (
                       <tr key={`${stat.source}-detail`}>
                         <td colSpan={6} className={styles.expandDetail}>
                           <div className={styles.expandTableWrapper}>

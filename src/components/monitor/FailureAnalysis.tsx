@@ -175,14 +175,16 @@ export function FailureAnalysis({
     });
   }, [failureStats, filterChannel]);
 
-  useEffect(() => {
-    if (expandedChannel && !filteredStats.some((stat) => stat.source === expandedChannel)) {
-      setExpandedChannel(null);
-    }
-  }, [expandedChannel, filteredStats]);
+  const visibleExpandedChannel = useMemo(
+    () =>
+      expandedChannel && filteredStats.some((stat) => stat.source === expandedChannel)
+        ? expandedChannel
+        : null,
+    [expandedChannel, filteredStats]
+  );
 
   const toggleExpand = (source: string) => {
-    setExpandedChannel(expandedChannel === source ? null : source);
+    setExpandedChannel((prev) => (prev === source ? null : source));
   };
 
   const getTopFailedModels = (source: string, modelsMap: Record<string, ModelFailureStat>) => {
@@ -350,7 +352,7 @@ export function FailureAnalysis({
                           </div>
                         </td>
                       </tr>
-                      {expandedChannel === stat.source && (
+                      {visibleExpandedChannel === stat.source && (
                         <tr key={`${stat.source}-detail`}>
                           <td colSpan={5} className={styles.expandDetail}>
                             <div className={styles.expandTableWrapper}>

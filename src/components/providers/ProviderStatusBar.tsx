@@ -72,8 +72,6 @@ export function ProviderStatusBar({ statusData, styles: stylesProp }: ProviderSt
 
   useEffect(() => {
     if (activeTooltip === null) {
-      setTooltipOffset(0);
-      setTooltipArrowOffset(null);
       return;
     }
 
@@ -125,6 +123,9 @@ export function ProviderStatusBar({ statusData, styles: stylesProp }: ProviderSt
     }
   }, []);
 
+  const activeTooltipOffset = activeTooltip === null ? 0 : tooltipOffset;
+  const activeTooltipArrowOffset = activeTooltip === null ? null : tooltipArrowOffset;
+
   const renderTooltip = (detail: StatusBlockDetail) => {
     const total = detail.success + detail.failure;
     const timeRange = `${formatTime(detail.startTime)} – ${formatTime(detail.endTime)}`;
@@ -134,9 +135,9 @@ export function ProviderStatusBar({ statusData, styles: stylesProp }: ProviderSt
         ref={tooltipRef}
         className={s.statusTooltip}
         style={{
-          transform: `translateX(calc(-50% + ${tooltipOffset}px))`,
-          ['--status-tooltip-arrow-left' as string]: tooltipArrowOffset
-            ? `${tooltipArrowOffset}px`
+          transform: `translateX(calc(-50% + ${activeTooltipOffset}px))`,
+          ['--status-tooltip-arrow-left' as string]: activeTooltipArrowOffset
+            ? `${activeTooltipArrowOffset}px`
             : undefined,
         }}
       >
