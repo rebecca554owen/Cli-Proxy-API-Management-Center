@@ -520,6 +520,3 @@ export function IconSidebarSystem({ size = 20, ...props }: IconProps) {
     </svg>
   );
 }
-    </svg>
-  );
-}
