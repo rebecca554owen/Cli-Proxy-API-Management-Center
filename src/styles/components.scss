@@ -73,15 +73,13 @@
   }
 }
 
-:global([data-theme='dark']) {
-  .btn {
-    color: #fff;
-  }
+[data-theme='dark'] .btn {
+  color: #fff;
+}
 
-  .btn.btn-secondary,
-  .btn.btn-ghost {
-    color: #fff;
-  }
+[data-theme='dark'] .btn.btn-secondary,
+[data-theme='dark'] .btn.btn-ghost {
+  color: #fff;
 }
 
 .input,

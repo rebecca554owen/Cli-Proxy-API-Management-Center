@@ -16,7 +16,7 @@ import iconGemini from '@/assets/icons/gemini.svg';
 import iconKimiLight from '@/assets/icons/kimi-light.svg';
 import iconKimiDark from '@/assets/icons/kimi-dark.svg';
 import iconQwen from '@/assets/icons/qwen.svg';
-import iconIflow from '@/assets/icons/iflow.svg';
+import iconIflowRaw from '@/assets/icons/iflow.svg?raw';
 import iconVertex from '@/assets/icons/vertex.svg';
 import iconKiro from '@/assets/icons/kiro.svg';
 
@@ -103,6 +103,8 @@ const getAuthKey = (provider: OAuthProvider, suffix: string) =>
 const getIcon = (icon: string | { light: string; dark: string }, theme: 'light' | 'dark') => {
   return typeof icon === 'string' ? icon : icon[theme];
 };
+
+const iconIflow = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(iconIflowRaw)}`;
 
 export function OAuthPage() {
   const { t } = useTranslation();

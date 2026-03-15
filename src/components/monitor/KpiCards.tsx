@@ -1,13 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TimeRange } from '@/pages/MonitorPage';
-import { monitorApi, type MonitorKpiData } from '@/services/api/monitor';
+import type { MonitorKpiData } from '@/services/api/monitor';
+import { useMonitorStore } from '@/stores';
+import { serializeMonitorParams } from '@/stores/useMonitorStore';
 import { buildMonitorTimeRangeParams } from '@/utils/monitor';
 import styles from '@/pages/MonitorPage.module.scss';
 
 interface KpiCardsProps {
   timeRange: TimeRange;
   apiFilter: string;
+  refreshKey: number;
   isDark?: boolean;
 }
 
@@ -25,35 +28,22 @@ function formatNumber(num: number): string {
   return num.toLocaleString();
 }
 
-export function KpiCards({ timeRange, apiFilter }: KpiCardsProps) {
+export function KpiCards({ timeRange, apiFilter, refreshKey }: KpiCardsProps) {
   const { t } = useTranslation();
-  const [loading, setLoading] = useState(true);
-  const [kpiData, setKpiData] = useState<MonitorKpiData | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-
-    const params = {
+  const ensureKpi = useMonitorStore((state) => state.ensureKpi);
+  const params = useMemo(
+    () => ({
       ...buildMonitorTimeRangeParams(timeRange),
       ...(apiFilter ? { api_filter: apiFilter } : {}),
-    };
+    }),
+    [timeRange, apiFilter]
+  );
+  const cacheKey = useMemo(() => serializeMonitorParams(params), [params]);
+  const entry = useMonitorStore((state) => state.kpiCache[cacheKey]);
 
-    monitorApi.getKpi(params).then((data) => {
-      if (!cancelled) {
-        setKpiData(data);
-        setLoading(false);
-      }
-    }).catch((err) => {
-      console.error('KPI data load failed:', err);
-      if (!cancelled) {
-        setKpiData(null);
-        setLoading(false);
-      }
-    });
-
-    return () => { cancelled = true; };
-  }, [timeRange, apiFilter]);
+  useEffect(() => {
+    void ensureKpi(params, refreshKey > 0);
+  }, [ensureKpi, params, refreshKey]);
 
   const timeRangeLabel = (() => {
     if (timeRange === 'yesterday') return t('monitor.yesterday');
@@ -61,6 +51,9 @@ export function KpiCards({ timeRange, apiFilter }: KpiCardsProps) {
     if (timeRange === 1) return t('monitor.today');
     return t('monitor.last_n_days', { n: timeRange });
   })();
+
+  const kpiData: MonitorKpiData | null = entry?.data ?? null;
+  const loading = !kpiData && (entry?.loading ?? true);
 
   const stats = kpiData ?? {
     total_requests: 0,

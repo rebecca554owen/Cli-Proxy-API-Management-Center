@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { monitorApi, type MonitorKeyStatsResponse } from '@/services/api/monitor';
 import {
   blocksToStatusBarData,
+  normalizeUsageSourceId,
   type KeyStats,
   type StatusBarData,
 } from '@/utils/usage';
@@ -16,9 +17,18 @@ function processKeyStatsResponse(response: MonitorKeyStatsResponse) {
   const bySource: Record<string, { success: number; failure: number }> = {};
   const byAuthIndex: Record<string, { success: number; failure: number }> = {};
   const statusBarByAuthIndex = new Map<string, StatusBarData>();
+  const registerSource = (sourceKey: string, entry: (typeof by_source)[string]) => {
+    const normalizedKey = normalizeUsageSourceId(sourceKey);
+    const aliases = normalizedKey && normalizedKey !== sourceKey ? [sourceKey, normalizedKey] : [sourceKey];
+
+    aliases.forEach((alias) => {
+      if (!alias || alias in bySource) return;
+      bySource[alias] = { success: entry.success, failure: entry.failure };
+    });
+  };
 
   for (const [key, entry] of Object.entries(by_source)) {
-    bySource[key] = { success: entry.success, failure: entry.failure };
+    registerSource(key, entry);
   }
   for (const [key, entry] of Object.entries(by_auth_index)) {
     byAuthIndex[key] = { success: entry.success, failure: entry.failure };

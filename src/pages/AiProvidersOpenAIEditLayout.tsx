@@ -13,7 +13,11 @@ import { buildApiKeyEntry } from '@/components/providers/utils';
 import type { ModelEntry, OpenAIFormState } from '@/components/providers/types';
 import type { KeyTestStatus } from '@/stores/useOpenAIEditDraftStore';
 
-type LocationState = { fromAiProviders?: boolean } | null;
+type LocationState = {
+  fromAiProviders?: boolean;
+  copySource?: OpenAIProviderConfig;
+  copyIndex?: number;
+} | null;
 
 export type OpenAIEditOutletContext = {
   hasIndexParam: boolean;
@@ -49,6 +53,23 @@ const buildEmptyForm = (): OpenAIFormState => ({
   apiKeyEntries: [buildApiKeyEntry()],
   modelEntries: [{ name: '', alias: '' }],
   testModel: undefined,
+});
+
+const buildCopyForm = (source: OpenAIProviderConfig): OpenAIFormState => ({
+  name: '',
+  priority: source.priority,
+  prefix: source.prefix ?? '',
+  baseUrl: source.baseUrl,
+  headers: headersToEntries(source.headers),
+  apiKeyEntries: source.apiKeyEntries?.length
+    ? source.apiKeyEntries.map((entry) => ({
+        apiKey: '',
+        proxyUrl: entry.proxyUrl ?? '',
+        headers: entry.headers,
+      }))
+    : [buildApiKeyEntry()],
+  modelEntries: modelsToEntries(source.models),
+  testModel: source.testModel,
 });
 
 const parseIndexParam = (value: string | undefined) => {
@@ -266,6 +287,26 @@ export function AiProvidersOpenAIEditLayout() {
     if (loading) return;
     if (draft?.initialized) return;
 
+    const locationState = location.state as LocationState;
+
+    if (editIndex === null && locationState?.copySource) {
+      const copiedForm = buildCopyForm(locationState.copySource);
+      const copiedModels = copiedForm.modelEntries.map((entry) => entry.name.trim()).filter(Boolean);
+      const copiedTestModel =
+        copiedForm.testModel && copiedModels.includes(copiedForm.testModel)
+          ? copiedForm.testModel
+          : copiedModels[0] || '';
+      initDraft(draftKey, {
+        baselineSignature: buildOpenAISignature(copiedForm, copiedTestModel),
+        form: copiedForm,
+        testModel: copiedTestModel,
+        testStatus: 'idle',
+        testMessage: '',
+        keyTestStatuses: [],
+      });
+      return;
+    }
+
     if (initialData) {
       const modelEntries = modelsToEntries(initialData.models);
       const seededForm: OpenAIFormState = {
@@ -306,7 +347,7 @@ export function AiProvidersOpenAIEditLayout() {
         keyTestStatuses: [],
       });
     }
-  }, [draft?.initialized, draftKey, initDraft, initialData, loading]);
+  }, [draft?.initialized, draftKey, initDraft, initialData, loading, location.state, editIndex]);
 
   useEffect(() => {
     if (loading) return;
@@ -420,10 +461,17 @@ export function AiProvidersOpenAIEditLayout() {
       const models = entriesToModels(form.modelEntries);
       if (models.length) payload.models = models;
 
+      const locationState = location.state as LocationState;
       const nextList =
         editIndex !== null
           ? providers.map((item, idx) => (idx === editIndex ? payload : item))
-          : [...providers, payload];
+          : locationState?.copySource && typeof locationState.copyIndex === 'number'
+            ? [
+                ...providers.slice(0, locationState.copyIndex + 1),
+                payload,
+                ...providers.slice(locationState.copyIndex + 1),
+              ]
+            : [...providers, payload];
 
       await providersApi.saveOpenAIProviders(nextList);
 
@@ -464,6 +512,7 @@ export function AiProvidersOpenAIEditLayout() {
     showNotification,
     t,
     testModel,
+    location.state,
   ]);
 
   return (

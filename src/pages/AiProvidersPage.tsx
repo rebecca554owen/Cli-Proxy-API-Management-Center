@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   AmpcodeSection,
   ClaudeSection,
@@ -24,6 +24,7 @@ import styles from './AiProvidersPage.module.scss';
 export function AiProvidersPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const { showNotification, showConfirmation } = useNotificationStore();
   const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
@@ -59,7 +60,7 @@ export function AiProvidersPage() {
   const disableControls = connectionStatus !== 'connected';
   const isSwitching = Boolean(configSwitchingKey);
 
-  const { keyStats, statusBarBySource, loadKeyStats, refreshKeyStats } = useProviderStats();
+  const { keyStats, usageDetails, loadKeyStats, refreshKeyStats } = useProviderStats();
 
   const getErrorMessage = (err: unknown) => {
     if (err instanceof Error) return err.message;
@@ -130,6 +131,15 @@ export function AiProvidersPage() {
     config?.openaiCompatibility,
   ]);
 
+  useEffect(() => {
+    const state = location.state as { updatedClaudeConfigs?: ProviderKeyConfig[] } | null;
+    if (!state?.updatedClaudeConfigs) return;
+    setClaudeConfigs(state.updatedClaudeConfigs);
+    updateConfigValue('claude-api-key', state.updatedClaudeConfigs);
+    clearCache('claude-api-key');
+    navigate(location.pathname, { replace: true, state: null });
+  }, [clearCache, location.pathname, location.state, navigate, updateConfigValue]);
+
   useHeaderRefresh(refreshKeyStats);
 
   const openEditor = useCallback(
@@ -137,6 +147,36 @@ export function AiProvidersPage() {
       navigate(path, { state: { fromAiProviders: true } });
     },
     [navigate]
+  );
+
+  const duplicateClaudeConfig = useCallback(
+    (index: number) => {
+      const entry = claudeConfigs[index];
+      if (!entry) return;
+      navigate('/ai-providers/claude/new', {
+        state: {
+          fromAiProviders: true,
+          copySource: entry,
+          copyIndex: index,
+        },
+      });
+    },
+    [claudeConfigs, navigate]
+  );
+
+  const duplicateOpenAIProvider = useCallback(
+    (index: number) => {
+      const entry = openaiProviders[index];
+      if (!entry) return;
+      navigate('/ai-providers/openai/new', {
+        state: {
+          fromAiProviders: true,
+          copySource: entry,
+          copyIndex: index,
+        },
+      });
+    },
+    [navigate, openaiProviders]
   );
 
   const deleteGemini = async (index: number) => {
@@ -164,7 +204,7 @@ export function AiProvidersPage() {
   };
 
   const setConfigEnabled = async (
-    provider: 'gemini' | 'codex' | 'claude' | 'vertex',
+    provider: 'gemini' | 'codex' | 'claude' | 'vertex' | 'openai',
     index: number,
     enabled: boolean
   ) => {
@@ -203,6 +243,41 @@ export function AiProvidersPage() {
       }
       return;
     }
+    if (provider === 'openai') {
+      const current = openaiProviders[index];
+      if (!current) return;
+
+      const switchingKey = `${provider}:${current.name}`;
+      setConfigSwitchingKey(switchingKey);
+
+      const previousList = openaiProviders;
+      const nextExcluded = enabled
+        ? withoutDisableAllModelsRule(current.excludedModels)
+        : withDisableAllModelsRule(current.excludedModels);
+      const nextItem: OpenAIProviderConfig = { ...current, excludedModels: nextExcluded };
+      const nextList = previousList.map((item, idx) => (idx === index ? nextItem : item));
+
+      setOpenaiProviders(nextList);
+      updateConfigValue('openai-compatibility', nextList);
+      clearCache('openai-compatibility');
+
+      try {
+        await providersApi.saveOpenAIProviders(nextList);
+        showNotification(
+          enabled ? t('notification.config_enabled') : t('notification.config_disabled'),
+          'success'
+        );
+      } catch (err: unknown) {
+        const message = getErrorMessage(err);
+        setOpenaiProviders(previousList);
+        updateConfigValue('openai-compatibility', previousList);
+        clearCache('openai-compatibility');
+        showNotification(`${t('notification.update_failed')}: ${message}`, 'error');
+      } finally {
+        setConfigSwitchingKey(null);
+      }
+      return;
+    }
 
     const source =
       provider === 'codex'
@@ -210,6 +285,7 @@ export function AiProvidersPage() {
         : provider === 'claude'
           ? claudeConfigs
           : vertexConfigs;
+
     const current = source[index];
     if (!current) return;
 
@@ -362,7 +438,7 @@ export function AiProvidersPage() {
           <GeminiSection
             configs={geminiKeys}
             keyStats={keyStats}
-            statusBarBySource={statusBarBySource}
+            usageDetails={usageDetails}
             loading={loading}
             disableControls={disableControls}
             isSwitching={isSwitching}
@@ -377,7 +453,7 @@ export function AiProvidersPage() {
           <CodexSection
             configs={codexConfigs}
             keyStats={keyStats}
-            statusBarBySource={statusBarBySource}
+            usageDetails={usageDetails}
             loading={loading}
             disableControls={disableControls}
             isSwitching={isSwitching}
@@ -393,11 +469,12 @@ export function AiProvidersPage() {
           <ClaudeSection
             configs={claudeConfigs}
             keyStats={keyStats}
-            statusBarBySource={statusBarBySource}
+            usageDetails={usageDetails}
             loading={loading}
             disableControls={disableControls}
             isSwitching={isSwitching}
             onAdd={() => openEditor('/ai-providers/claude/new')}
+            onDuplicate={duplicateClaudeConfig}
             onEdit={(index) => openEditor(`/ai-providers/claude/${index}`)}
             onDelete={(index) => void deleteProviderEntry('claude', index)}
             onToggle={(index, enabled) => void setConfigEnabled('claude', index, enabled)}
@@ -408,7 +485,7 @@ export function AiProvidersPage() {
           <VertexSection
             configs={vertexConfigs}
             keyStats={keyStats}
-            statusBarBySource={statusBarBySource}
+            usageDetails={usageDetails}
             loading={loading}
             disableControls={disableControls}
             isSwitching={isSwitching}
@@ -433,14 +510,16 @@ export function AiProvidersPage() {
           <OpenAISection
             configs={openaiProviders}
             keyStats={keyStats}
-            statusBarBySource={statusBarBySource}
+            usageDetails={usageDetails}
             loading={loading}
             disableControls={disableControls}
             isSwitching={isSwitching}
             resolvedTheme={resolvedTheme}
             onAdd={() => openEditor('/ai-providers/openai/new')}
+            onDuplicate={duplicateOpenAIProvider}
             onEdit={(index) => openEditor(`/ai-providers/openai/${index}`)}
             onDelete={deleteOpenai}
+            onToggle={(index, enabled) => void setConfigEnabled('openai', index, enabled)}
           />
         </div>
       </div>

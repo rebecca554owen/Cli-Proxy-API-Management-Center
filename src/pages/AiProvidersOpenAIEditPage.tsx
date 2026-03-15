@@ -621,6 +621,7 @@ export function AiProvidersOpenAIEditPage() {
                 onChange={(entries) => setForm((prev) => ({ ...prev, modelEntries: entries }))}
                 namePlaceholder={t('common.model_name_placeholder')}
                 aliasPlaceholder={t('common.model_alias_placeholder')}
+                aliasFirst
                 disabled={saving || disableControls || isTestingKeys}
                 hideAddButton
                 className={styles.modelInputList}

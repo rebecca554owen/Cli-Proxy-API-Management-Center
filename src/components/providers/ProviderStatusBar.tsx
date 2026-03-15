@@ -44,6 +44,10 @@ export function ProviderStatusBar({ statusData, styles: stylesProp }: ProviderSt
   const s = (stylesProp || defaultStyles) as StylesModule;
   const [activeTooltip, setActiveTooltip] = useState<number | null>(null);
   const blocksRef = useRef<HTMLDivElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const wrapperRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const [tooltipOffset, setTooltipOffset] = useState(0);
+  const [tooltipArrowOffset, setTooltipArrowOffset] = useState<number | null>(null);
 
   const hasData = statusData.totalSuccess + statusData.totalFailure > 0;
   const rateClass = !hasData
@@ -66,6 +70,42 @@ export function ProviderStatusBar({ statusData, styles: stylesProp }: ProviderSt
     return () => document.removeEventListener('pointerdown', handler);
   }, [activeTooltip]);
 
+  useEffect(() => {
+    if (activeTooltip === null) {
+      setTooltipOffset(0);
+      setTooltipArrowOffset(null);
+      return;
+    }
+
+    const updatePosition = () => {
+      const container = blocksRef.current;
+      const tooltip = tooltipRef.current;
+      const wrapper = wrapperRefs.current[activeTooltip];
+      if (!container || !tooltip || !wrapper) return;
+
+      const containerRect = container.getBoundingClientRect();
+      const tooltipRect = tooltip.getBoundingClientRect();
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const wrapperCenter = wrapperRect.left + wrapperRect.width / 2;
+      const defaultLeft = wrapperCenter - tooltipRect.width / 2;
+      const minLeft = containerRect.left;
+      const maxLeft = containerRect.right - tooltipRect.width;
+      const clampedLeft = Math.min(Math.max(defaultLeft, minLeft), Math.max(minLeft, maxLeft));
+      const nextOffset = clampedLeft - defaultLeft;
+      const arrowCenter = wrapperCenter - clampedLeft;
+
+      setTooltipOffset(nextOffset);
+      setTooltipArrowOffset(arrowCenter);
+    };
+
+    const frame = window.requestAnimationFrame(updatePosition);
+    window.addEventListener('resize', updatePosition);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [activeTooltip, statusData]);
+
   const handlePointerEnter = useCallback((e: React.PointerEvent, idx: number) => {
     if (e.pointerType === 'mouse') {
       setActiveTooltip(idx);
@@ -85,19 +125,21 @@ export function ProviderStatusBar({ statusData, styles: stylesProp }: ProviderSt
     }
   }, []);
 
-  const getTooltipPositionClass = (idx: number, total: number): string => {
-    if (idx <= 2) return s.statusTooltipLeft;
-    if (idx >= total - 3) return s.statusTooltipRight;
-    return '';
-  };
-
-  const renderTooltip = (detail: StatusBlockDetail, idx: number) => {
+  const renderTooltip = (detail: StatusBlockDetail) => {
     const total = detail.success + detail.failure;
-    const posClass = getTooltipPositionClass(idx, statusData.blockDetails.length);
     const timeRange = `${formatTime(detail.startTime)} – ${formatTime(detail.endTime)}`;
 
     return (
-      <div className={`${s.statusTooltip} ${posClass}`}>
+      <div
+        ref={tooltipRef}
+        className={s.statusTooltip}
+        style={{
+          transform: `translateX(calc(-50% + ${tooltipOffset}px))`,
+          ['--status-tooltip-arrow-left' as string]: tooltipArrowOffset
+            ? `${tooltipArrowOffset}px`
+            : undefined,
+        }}
+      >
         <span className={s.tooltipTime}>{timeRange}</span>
         {total > 0 ? (
           <span className={s.tooltipStats}>
@@ -123,6 +165,9 @@ export function ProviderStatusBar({ statusData, styles: stylesProp }: ProviderSt
           return (
             <div
               key={idx}
+              ref={(node) => {
+                wrapperRefs.current[idx] = node;
+              }}
               className={`${s.statusBlockWrapper} ${isActive ? s.statusBlockActive : ''}`}
               onPointerEnter={(e) => handlePointerEnter(e, idx)}
               onPointerLeave={handlePointerLeave}
@@ -132,7 +177,7 @@ export function ProviderStatusBar({ statusData, styles: stylesProp }: ProviderSt
                 className={`${s.statusBlock} ${isIdle ? s.statusBlockIdle : ''}`}
                 style={blockStyle}
               />
-              {isActive && renderTooltip(detail, idx)}
+              {isActive && renderTooltip(detail)}
             </div>
           );
         })}

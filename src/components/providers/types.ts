@@ -1,6 +1,6 @@
 import type { ApiKeyEntry, GeminiKeyConfig, ProviderKeyConfig } from '@/types';
 import type { HeaderEntry } from '@/utils/headers';
-import type { KeyStats, StatusBarData } from '@/utils/usage';
+import type { KeyStats, StatusBarData, UsageDetail } from '@/utils/usage';
 
 export interface ModelEntry {
   name: string;
@@ -41,6 +41,7 @@ export type ProviderFormState = Omit<ProviderKeyConfig, 'headers'> & {
   headers: HeaderEntry[];
   modelEntries: ModelEntry[];
   excludedText: string;
+  apiKeys?: string[];
 };
 
 export type VertexFormState = Omit<ProviderKeyConfig, 'headers'> & {
@@ -53,6 +54,7 @@ export interface ProviderSectionProps<TConfig> {
   configs: TConfig[];
   keyStats: KeyStats;
   statusBarBySource: Map<string, StatusBarData>;
+  usageDetails: UsageDetail[];
   disabled: boolean;
   onEdit: (index: number) => void;
   onAdd: () => void;

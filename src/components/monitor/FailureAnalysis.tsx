@@ -1,16 +1,20 @@
 import { useMemo, useState, useCallback, Fragment, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
-import { monitorApi, type MonitorFailureStatsItem } from '@/services/api';
-import { useDisableModel } from '@/hooks';
+import type { MonitorFailureStatsItem } from '@/services/api';
+import { useMonitorChannelActions } from '@/hooks';
+import { useMonitorStore } from '@/stores';
+import { serializeMonitorParams } from '@/stores/useMonitorStore';
 import { TimeRangeSelector, type TimeRange } from './TimeRangeSelector';
-import { DisableModelModal } from './DisableModelModal';
 import {
   formatTimestamp,
   getRateClassName,
   getProviderDisplayParts,
   buildMonitorTimeRangeParams,
+  monitorSourceRefToMeta,
+  resolveMonitorSourceAction,
   type DateRange,
+  type MonitorSourceMeta,
 } from '@/utils/monitor';
 import styles from '@/pages/MonitorPage.module.scss';
 
@@ -18,7 +22,9 @@ interface FailureAnalysisProps {
   refreshKey: number;
   loading: boolean;
   providerMap: Record<string, string>;
-  providerModels: Record<string, Set<string>>;
+  sourceAuthMap: Record<string, string>;
+  sourceMetaMap: Record<string, MonitorSourceMeta>;
+  onSourceChanged: () => Promise<void>;
 }
 
 interface ModelFailureStat {
@@ -38,14 +44,17 @@ interface FailureStat {
   failedCount: number;
   lastFailTime: number;
   models: Record<string, ModelFailureStat>;
+  sourceRef?: MonitorFailureStatsItem['source_ref'];
 }
 
-interface ChannelFilterOption {
-  source: string;
-  label: string;
-}
-
-export function FailureAnalysis({ refreshKey, loading, providerMap, providerModels }: FailureAnalysisProps) {
+export function FailureAnalysis({
+  refreshKey,
+  loading,
+  providerMap,
+  sourceAuthMap,
+  sourceMetaMap,
+  onSourceChanged,
+}: FailureAnalysisProps) {
   const { t } = useTranslation();
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
   const [filterChannel, setFilterChannel] = useState('');
@@ -53,19 +62,7 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
 
   const [timeRange, setTimeRange] = useState<TimeRange>(1);
   const [customRange, setCustomRange] = useState<DateRange | undefined>();
-
-  const [failureStats, setFailureStats] = useState<FailureStat[]>([]);
-  const [filters, setFilters] = useState<{ channels: ChannelFilterOption[]; models: string[] }>({ channels: [], models: [] });
-  const [analysisLoading, setAnalysisLoading] = useState(false);
-
-  const {
-    disableState,
-    disabling,
-    isModelDisabled,
-    handleDisableClick: onDisableClick,
-    handleConfirmDisable,
-    handleCancelDisable,
-  } = useDisableModel({ providerMap, providerModels });
+  const ensureFailureAnalysis = useMonitorStore((state) => state.ensureFailureAnalysis);
 
   const handleTimeRangeChange = useCallback((range: TimeRange, custom?: DateRange) => {
     setTimeRange(range);
@@ -80,7 +77,9 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
 
   const mapFailureStat = useCallback((item: MonitorFailureStatsItem): FailureStat => {
     const source = item.source || 'unknown';
-    const { provider, masked } = getProviderDisplayParts(source, providerMap);
+    const fallbackDisplay = getProviderDisplayParts(source, providerMap);
+    const provider = item.source_ref?.display_name || fallbackDisplay.provider;
+    const masked = item.source_ref?.display_secret || fallbackDisplay.masked;
     const displayName = provider ? `${provider} (${masked})` : masked;
 
     const models: Record<string, ModelFailureStat> = {};
@@ -106,50 +105,68 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
       failedCount: item.failed_count || 0,
       lastFailTime: item.last_failed_at ? new Date(item.last_failed_at).getTime() : 0,
       models,
+      sourceRef: item.source_ref,
     };
   }, [providerMap]);
 
-  const loadFailureAnalysis = useCallback(async () => {
-    setAnalysisLoading(true);
-    try {
-      const response = await monitorApi.getFailureAnalysis({
-        limit: 10,
-        source: filterChannel || undefined,
-        model: filterModel || undefined,
-        ...buildMonitorTimeRangeParams(timeRange, customRange),
-      });
-
-      const mapped = (response.items || []).map(mapFailureStat);
-      setFailureStats(mapped);
-
-      const sourceSet = new Set<string>(
-        (response.filters?.sources && response.filters.sources.length > 0)
-          ? response.filters.sources
-          : mapped.map((stat) => stat.source)
-      );
-      const channels = Array.from(sourceSet)
-        .filter((source) => !!source)
-        .map((source) => ({ source, label: formatChannelLabel(source) }))
-        .sort((a, b) => a.label.localeCompare(b.label, 'zh-Hans-CN'));
-
-      const modelSet = new Set<string>(
-        (response.filters?.models && response.filters.models.length > 0)
-          ? response.filters.models
-          : mapped.flatMap((stat) => Object.keys(stat.models))
-      );
-      setFilters({ channels, models: Array.from(modelSet).sort() });
-    } catch (err) {
-      console.error('失败分析加载失败：', err);
-      setFailureStats([]);
-      setFilters({ channels: [], models: [] });
-    } finally {
-      setAnalysisLoading(false);
-    }
-  }, [filterChannel, filterModel, timeRange, customRange, mapFailureStat, formatChannelLabel]);
+  const params = useMemo(
+    () => ({
+      limit: 10,
+      source: filterChannel || undefined,
+      model: filterModel || undefined,
+      ...buildMonitorTimeRangeParams(timeRange, customRange),
+    }),
+    [filterChannel, filterModel, timeRange, customRange]
+  );
+  const cacheKey = useMemo(() => serializeMonitorParams(params), [params]);
+  const entry = useMonitorStore((state) => state.failureAnalysisCache[cacheKey]);
+  const actionSourceMetaMap = useMemo(() => {
+    const nextMap = { ...sourceMetaMap };
+    (entry?.data?.items || []).forEach((item) => {
+      const meta = monitorSourceRefToMeta(item.source_ref);
+      if (meta?.source) {
+        nextMap[meta.source] = meta;
+      }
+    });
+    return nextMap;
+  }, [entry?.data?.items, sourceMetaMap]);
+  const { pendingSource, copySourceValue, openEditor, toggleSource, isSourceDisabled } =
+    useMonitorChannelActions({
+      sourceMetaMap: actionSourceMetaMap,
+      onChanged: onSourceChanged,
+    });
 
   useEffect(() => {
-    loadFailureAnalysis();
-  }, [loadFailureAnalysis, refreshKey]);
+    void ensureFailureAnalysis(params, refreshKey > 0);
+  }, [ensureFailureAnalysis, params, refreshKey]);
+
+  const failureStats = useMemo(
+    () => (entry?.data?.items || []).map(mapFailureStat),
+    [entry?.data?.items, mapFailureStat]
+  );
+
+  const filters = useMemo(() => {
+    const response = entry?.data;
+    const sourceSet = new Set<string>(
+      response?.filters?.sources && response.filters.sources.length > 0
+        ? response.filters.sources
+        : failureStats.map((stat) => stat.source)
+    );
+    const channels = Array.from(sourceSet)
+      .filter((source) => !!source)
+      .map((source) => ({ source, label: formatChannelLabel(source) }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'zh-Hans-CN'));
+
+    const modelSet = new Set<string>(
+      response?.filters?.models && response.filters.models.length > 0
+        ? response.filters.models
+        : failureStats.flatMap((stat) => Object.keys(stat.models))
+    );
+
+    return { channels, models: Array.from(modelSet).sort() };
+  }, [entry?.data, failureStats, formatChannelLabel]);
+
+  const analysisLoading = !entry?.data && (entry?.loading ?? true);
 
   const filteredStats = useMemo(() => {
     return failureStats.filter((stat) => {
@@ -172,19 +189,14 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
     return Object.entries(modelsMap)
       .filter(([, stat]) => stat.failure > 0)
       .sort((a, b) => {
-        const aDisabled = isModelDisabled(source, a[0]);
-        const bDisabled = isModelDisabled(source, b[0]);
+        const aDisabled = isSourceDisabled(source);
+        const bDisabled = isSourceDisabled(source);
         if (aDisabled !== bDisabled) {
           return aDisabled ? 1 : -1;
         }
         return b[1].failure - a[1].failure;
       })
       .slice(0, 2);
-  };
-
-  const handleDisableClick = (source: string, model: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    onDisableClick(source, model);
   };
 
   return (
@@ -236,10 +248,28 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
                   <th>{t('monitor.failure.header_count')}</th>
                   <th>{t('monitor.failure.header_time')}</th>
                   <th>{t('monitor.failure.header_models')}</th>
+                  <th>{t('monitor.logs.header_actions')}</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredStats.map((stat) => {
+                  const directMeta = monitorSourceRefToMeta(stat.sourceRef);
+                  const resolvedAction = resolveMonitorSourceAction(
+                    stat.source,
+                    actionSourceMetaMap,
+                    undefined,
+                    undefined,
+                    sourceAuthMap,
+                    providerMap
+                  );
+                  const fallbackAction =
+                    resolvedAction.meta || !directMeta
+                      ? resolvedAction
+                      : { actionSourceKey: directMeta.source, meta: directMeta };
+                  const actionSourceKey = fallbackAction.actionSourceKey;
+                  const sourceMeta = fallbackAction.meta;
+                  const hasActions = Boolean(actionSourceKey && sourceMeta);
+                  const disabled = actionSourceKey ? isSourceDisabled(actionSourceKey) : false;
                   const topModels = getTopFailedModels(stat.source, stat.models);
                   const totalFailedModels = Object.values(stat.models).filter((m) => m.failure > 0).length;
 
@@ -250,14 +280,21 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
                         onClick={() => toggleExpand(stat.source)}
                       >
                         <td>
-                          {stat.providerName ? (
-                            <>
-                              <span className={styles.channelName}>{stat.providerName}</span>
-                              <span className={styles.channelSecret}> ({stat.maskedKey})</span>
-                            </>
-                          ) : (
-                            stat.maskedKey
-                          )}
+                          <div className={styles.channelCell}>
+                            <div>
+                              {stat.providerName ? (
+                                <>
+                                  <span className={styles.channelName}>{stat.providerName}</span>
+                                  <span className={styles.channelSecret}> ({stat.maskedKey})</span>
+                                </>
+                              ) : (
+                                stat.maskedKey
+                              )}
+                            </div>
+                            {sourceMeta?.summary && (
+                              <div className={styles.channelMeta}>{sourceMeta.summary}</div>
+                            )}
+                          </div>
                         </td>
                         <td className={styles.kpiFailure}>{stat.failedCount.toLocaleString()}</td>
                         <td>{formatTimestamp(stat.lastFailTime)}</td>
@@ -265,7 +302,6 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
                           {topModels.map(([model, modelStat]) => {
                             const percent = stat.failedCount > 0 ? ((modelStat.failure / stat.failedCount) * 100).toFixed(0) : '0';
                             const shortModel = model.length > 16 ? `${model.slice(0, 13)}...` : model;
-                            const disabled = isModelDisabled(stat.source, model);
                             return (
                               <span
                                 key={model}
@@ -280,10 +316,43 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
                             <span className={styles.moreModelsHint}>+{totalFailedModels - 2}</span>
                           )}
                         </td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <div className={styles.tableActions}>
+                            {hasActions && sourceMeta?.copyValue && (
+                              <button
+                                className={styles.actionBtn}
+                                onClick={() => void copySourceValue(actionSourceKey)}
+                              >
+                                {t('common.copy')}
+                              </button>
+                            )}
+                            {hasActions && sourceMeta?.editPath && (
+                              <button
+                                className={styles.actionBtn}
+                                onClick={() => openEditor(actionSourceKey)}
+                              >
+                                {t('common.edit')}
+                              </button>
+                            )}
+                            {hasActions && sourceMeta?.canToggle && (
+                              <button
+                                className={disabled ? styles.enableBtn : styles.disableBtn}
+                                onClick={() => void toggleSource(actionSourceKey)}
+                                disabled={pendingSource === actionSourceKey}
+                              >
+                                {pendingSource === actionSourceKey
+                                  ? t('common.loading')
+                                  : disabled
+                                    ? '启用'
+                                    : '禁用'}
+                              </button>
+                            )}
+                          </div>
+                        </td>
                       </tr>
                       {expandedChannel === stat.source && (
                         <tr key={`${stat.source}-detail`}>
-                          <td colSpan={4} className={styles.expandDetail}>
+                          <td colSpan={5} className={styles.expandDetail}>
                             <div className={styles.expandTableWrapper}>
                               <table className={styles.table}>
                                 <thead>
@@ -301,15 +370,14 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
                                   {Object.entries(stat.models)
                                     .filter(([, m]) => m.failure > 0)
                                     .sort((a, b) => {
-                                      const aDisabled = isModelDisabled(stat.source, a[0]);
-                                      const bDisabled = isModelDisabled(stat.source, b[0]);
+                                      const aDisabled = disabled;
+                                      const bDisabled = disabled;
                                       if (aDisabled !== bDisabled) {
                                         return aDisabled ? 1 : -1;
                                       }
                                       return b[1].failure - a[1].failure;
                                     })
                                     .map(([modelName, modelStat]) => {
-                                      const disabled = isModelDisabled(stat.source, modelName);
                                       return (
                                         <tr key={modelName} className={disabled ? styles.modelDisabled : ''}>
                                           <td>{modelName}</td>
@@ -333,18 +401,7 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
                                             </div>
                                           </td>
                                           <td>{formatTimestamp(modelStat.lastTimestamp)}</td>
-                                          <td>
-                                            {disabled ? (
-                                              <span className={styles.disabledLabel}>{t('monitor.logs.removed')}</span>
-                                            ) : stat.source && stat.source !== '-' && stat.source !== 'unknown' ? (
-                                              <button
-                                                className={styles.disableBtn}
-                                                onClick={(e) => handleDisableClick(stat.source, modelName, e)}
-                                              >
-                                                {t('monitor.logs.disable')}
-                                              </button>
-                                            ) : '-'}
-                                          </td>
+                                          <td>-</td>
                                         </tr>
                                       );
                                     })}
@@ -362,13 +419,6 @@ export function FailureAnalysis({ refreshKey, loading, providerMap, providerMode
           )}
         </div>
       </Card>
-
-      <DisableModelModal
-        disableState={disableState}
-        disabling={disabling}
-        onConfirm={handleConfirmDisable}
-        onCancel={handleCancelDisable}
-      />
     </>
   );
 }
