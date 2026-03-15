@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { viteSingleFile } from 'vite-plugin-singlefile';
 import path from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
+import { viteSingleFile } from './build/viteSingleFile';
 
 // Get version from environment, git tag, or package.json
 function getVersion(): string {
@@ -14,12 +14,25 @@ function getVersion(): string {
 
   // 2. Try git tag
   try {
-    const gitTag = execSync('git describe --tags --exact-match 2>/dev/null || git describe --tags 2>/dev/null || echo ""', { encoding: 'utf8' }).trim();
-    if (gitTag) {
-      return gitTag;
+    const exactTag = execFileSync('git', ['describe', '--tags', '--exact-match'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).trim();
+    if (exactTag) {
+      return exactTag;
     }
   } catch {
-    // Git not available or no tags
+  }
+
+  try {
+    const nearestTag = execFileSync('git', ['describe', '--tags'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).trim();
+    if (nearestTag) {
+      return nearestTag;
+    }
+  } catch {
   }
 
   // 3. Fall back to package.json version
@@ -39,9 +52,7 @@ function getVersion(): string {
 export default defineConfig({
   plugins: [
     react(),
-    viteSingleFile({
-      removeViteModuleLoader: true
-    })
+    viteSingleFile()
   ],
   define: {
     __APP_VERSION__: JSON.stringify(getVersion())
@@ -65,14 +76,6 @@ export default defineConfig({
   build: {
     target: 'es2020',
     outDir: 'dist',
-    assetsInlineLimit: 100000000,
-    chunkSizeWarningLimit: 100000000,
-    cssCodeSplit: false,
-    rollupOptions: {
-      output: {
-        inlineDynamicImports: true,
-        manualChunks: undefined
-      }
-    }
+    assetsInlineLimit: 100000000
   }
 });
