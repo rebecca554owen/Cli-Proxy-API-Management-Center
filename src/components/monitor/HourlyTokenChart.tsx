@@ -2,7 +2,9 @@ import { useMemo, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Chart } from 'react-chartjs-2';
 import type { TimeRange } from '@/pages/MonitorPage';
-import { monitorApi, type MonitorHourlyTokensData } from '@/services/api/monitor';
+import type { MonitorHourlyTokensData } from '@/services/api/monitor';
+import { useMonitorStore } from '@/stores';
+import { serializeMonitorParams } from '@/stores/useMonitorStore';
 import { buildMonitorTimeRangeParams } from '@/utils/monitor';
 import styles from '@/pages/MonitorPage.module.scss';
 
@@ -10,6 +12,7 @@ interface HourlyTokenChartProps {
   timeRange: TimeRange;
   apiFilter: string;
   isDark: boolean;
+  refreshKey: number;
 }
 
 type HourRange = 6 | 12 | 24;
@@ -23,37 +26,27 @@ const EMPTY_DATA: MonitorHourlyTokensData = {
   cached_tokens: [],
 };
 
-export function HourlyTokenChart({ timeRange, apiFilter, isDark }: HourlyTokenChartProps) {
+export function HourlyTokenChart({ timeRange, apiFilter, isDark, refreshKey }: HourlyTokenChartProps) {
   const { t } = useTranslation();
   const [hourRange, setHourRange] = useState<HourRange>(12);
-  const [loading, setLoading] = useState(true);
-  const [hourlyData, setHourlyData] = useState<MonitorHourlyTokensData>(EMPTY_DATA);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-
-    const params = {
+  const ensureHourlyTokens = useMonitorStore((state) => state.ensureHourlyTokens);
+  const params = useMemo(
+    () => ({
       hours: hourRange,
       ...buildMonitorTimeRangeParams(timeRange),
       ...(apiFilter ? { api_filter: apiFilter } : {}),
-    };
+    }),
+    [hourRange, timeRange, apiFilter]
+  );
+  const cacheKey = useMemo(() => serializeMonitorParams(params), [params]);
+  const entry = useMonitorStore((state) => state.hourlyTokensCache[cacheKey]);
 
-    monitorApi.getHourlyTokens(params).then((data) => {
-      if (!cancelled) {
-        setHourlyData(data);
-        setLoading(false);
-      }
-    }).catch((err) => {
-      console.error('Hourly tokens load failed:', err);
-      if (!cancelled) {
-        setHourlyData(EMPTY_DATA);
-        setLoading(false);
-      }
-    });
+  useEffect(() => {
+    void ensureHourlyTokens(params, refreshKey > 0);
+  }, [ensureHourlyTokens, params, refreshKey]);
 
-    return () => { cancelled = true; };
-  }, [timeRange, apiFilter, hourRange]);
+  const hourlyData: MonitorHourlyTokensData = entry?.data || EMPTY_DATA;
+  const loading = !entry?.data && (entry?.loading ?? true);
 
   // 获取时间范围标签
   const hourRangeLabel = useMemo(() => {

@@ -102,14 +102,16 @@
 }
 
 // 暗色主题适配
-:global([data-theme='dark']) {
-  .navList {
+.navList {
+  :global([data-theme='dark']) & {
     background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
     border-color: color-mix(in srgb, var(--border-color) 55%, transparent);
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
   }
+}
 
-  .indicator {
+.indicator {
+  :global([data-theme='dark']) & {
     background: rgba($primary-color, 0.28);
   }
 }

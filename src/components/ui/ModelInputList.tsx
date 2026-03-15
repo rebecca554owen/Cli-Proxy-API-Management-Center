@@ -18,6 +18,7 @@ interface ModelInputListProps {
   removeButtonClassName?: string;
   removeButtonTitle?: string;
   removeButtonAriaLabel?: string;
+  aliasFirst?: boolean;
 }
 
 export function ModelInputList({
@@ -35,11 +36,16 @@ export function ModelInputList({
   removeButtonClassName = '',
   removeButtonTitle = 'Remove',
   removeButtonAriaLabel = 'Remove',
+  aliasFirst = false,
 }: ModelInputListProps) {
   const currentEntries = entries.length ? entries : [{ name: '', alias: '' }];
   const containerClassName = ['header-input-list', className].filter(Boolean).join(' ');
   const inputClassNames = ['input', inputClassName].filter(Boolean).join(' ');
   const rowClassNames = ['header-input-row', rowClassName].filter(Boolean).join(' ');
+  const leftField: 'name' | 'alias' = aliasFirst ? 'alias' : 'name';
+  const rightField: 'name' | 'alias' = aliasFirst ? 'name' : 'alias';
+  const leftPlaceholder = aliasFirst ? aliasPlaceholder : namePlaceholder;
+  const rightPlaceholder = aliasFirst ? namePlaceholder : aliasPlaceholder;
 
   const updateEntry = (index: number, field: 'name' | 'alias', value: string) => {
     const next = currentEntries.map((entry, idx) => (idx === index ? { ...entry, [field]: value } : entry));
@@ -66,17 +72,17 @@ export function ModelInputList({
           <div className={rowClassNames}>
             <input
               className={inputClassNames}
-              placeholder={namePlaceholder}
-              value={entry.name}
-              onChange={(e) => updateEntry(index, 'name', e.target.value)}
+              placeholder={leftPlaceholder}
+              value={entry[leftField]}
+              onChange={(e) => updateEntry(index, leftField, e.target.value)}
               disabled={disabled}
             />
             <span className="header-separator">→</span>
             <input
               className={inputClassNames}
-              placeholder={aliasPlaceholder}
-              value={entry.alias}
-              onChange={(e) => updateEntry(index, 'alias', e.target.value)}
+              placeholder={rightPlaceholder}
+              value={entry[rightField]}
+              onChange={(e) => updateEntry(index, rightField, e.target.value)}
               disabled={disabled}
             />
             <Button

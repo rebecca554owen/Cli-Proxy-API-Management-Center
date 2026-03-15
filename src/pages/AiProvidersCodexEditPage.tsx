@@ -546,6 +546,7 @@ export function AiProvidersCodexEditPage() {
                 onChange={(entries) => setForm((prev) => ({ ...prev, modelEntries: entries }))}
                 namePlaceholder={t('common.model_name_placeholder')}
                 aliasPlaceholder={t('common.model_alias_placeholder')}
+                aliasFirst
                 disabled={disableControls || saving}
                 hideAddButton
                 className={styles.modelInputList}

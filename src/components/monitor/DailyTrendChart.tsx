@@ -1,8 +1,10 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Chart } from 'react-chartjs-2';
 import type { TimeRange } from '@/pages/MonitorPage';
-import { monitorApi, type MonitorDailyTrendItem } from '@/services/api/monitor';
+import type { MonitorDailyTrendItem } from '@/services/api/monitor';
+import { useMonitorStore } from '@/stores';
+import { serializeMonitorParams } from '@/stores/useMonitorStore';
 import { buildMonitorTimeRangeParams } from '@/utils/monitor';
 import styles from '@/pages/MonitorPage.module.scss';
 
@@ -10,37 +12,28 @@ interface DailyTrendChartProps {
   timeRange: TimeRange;
   apiFilter: string;
   isDark: boolean;
+  refreshKey: number;
 }
 
-export function DailyTrendChart({ timeRange, apiFilter, isDark }: DailyTrendChartProps) {
+export function DailyTrendChart({ timeRange, apiFilter, isDark, refreshKey }: DailyTrendChartProps) {
   const { t } = useTranslation();
-  const [loading, setLoading] = useState(true);
-  const [dailyItems, setDailyItems] = useState<MonitorDailyTrendItem[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-
-    const params = {
+  const ensureDailyTrend = useMonitorStore((state) => state.ensureDailyTrend);
+  const params = useMemo(
+    () => ({
       ...buildMonitorTimeRangeParams(timeRange),
       ...(apiFilter ? { api_filter: apiFilter } : {}),
-    };
+    }),
+    [timeRange, apiFilter]
+  );
+  const cacheKey = useMemo(() => serializeMonitorParams(params), [params]);
+  const entry = useMonitorStore((state) => state.dailyTrendCache[cacheKey]);
 
-    monitorApi.getDailyTrend(params).then((data) => {
-      if (!cancelled) {
-        setDailyItems(data.items || []);
-        setLoading(false);
-      }
-    }).catch((err) => {
-      console.error('Daily trend load failed:', err);
-      if (!cancelled) {
-        setDailyItems([]);
-        setLoading(false);
-      }
-    });
+  useEffect(() => {
+    void ensureDailyTrend(params, refreshKey > 0);
+  }, [ensureDailyTrend, params, refreshKey]);
 
-    return () => { cancelled = true; };
-  }, [timeRange, apiFilter]);
+  const dailyItems: MonitorDailyTrendItem[] = entry?.data?.items || [];
+  const loading = !entry?.data && (entry?.loading ?? true);
 
   // 图表数据
   const chartData = useMemo(() => {

@@ -113,8 +113,8 @@
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
 }
 
-:global([data-theme='dark']) {
-  .floatingActionSurface {
+.floatingActionSurface {
+  :global([data-theme='dark']) & {
     background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
     border-color: color-mix(in srgb, var(--border-color) 55%, transparent);
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);

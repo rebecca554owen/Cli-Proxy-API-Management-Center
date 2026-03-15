@@ -11,23 +11,21 @@ const resolveDefaultLocale = (): string | undefined => {
   return fromNavigator || undefined;
 };
 
-/**
- * 隐藏 API Key 中间部分，仅保留前后两位
- */
 export function maskApiKey(key: string): string {
   const trimmed = String(key || '').trim();
   if (!trimmed) {
     return '';
   }
 
-  const MASKED_LENGTH = 10;
-  const visibleChars = trimmed.length < 4 ? 1 : 2;
-  const start = trimmed.slice(0, visibleChars);
-  const end = trimmed.slice(-visibleChars);
-  const maskedLength = Math.max(MASKED_LENGTH - visibleChars * 2, 1);
-  const masked = '*'.repeat(maskedLength);
+  if (trimmed.length <= 12) {
+    const edge = Math.max(2, Math.floor(trimmed.length / 3));
+    return `${trimmed.slice(0, edge)}***${trimmed.slice(-edge)}`;
+  }
 
-  return `${start}${masked}${end}`;
+  const start = trimmed.slice(0, 6);
+  const end = trimmed.slice(-6);
+
+  return `${start}***${end}`;
 }
 
 /**

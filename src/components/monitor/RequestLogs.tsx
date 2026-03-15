@@ -2,11 +2,11 @@ import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Card } from '@/components/ui/Card';
-import { monitorApi, type MonitorRequestLogItem } from '@/services/api';
-import { useDisableModel } from '@/hooks';
+import type { MonitorRequestLogItem } from '@/services/api';
+import { useMonitorChannelActions } from '@/hooks';
+import { useMonitorStore } from '@/stores';
+import { serializeMonitorParams } from '@/stores/useMonitorStore';
 import { TimeRangeSelector, formatTimeRangeCaption, type TimeRange } from './TimeRangeSelector';
-import { DisableModelModal } from './DisableModelModal';
-import { UnsupportedDisableModal } from './UnsupportedDisableModal';
 import {
   maskSecret,
   formatProviderDisplay,
@@ -15,7 +15,10 @@ import {
   getProviderDisplayParts,
   buildMonitorTimeRangeParams,
   formatCompactTokenNumber,
+  monitorSourceRefToMeta,
+  resolveMonitorSourceAction,
   type DateRange,
+  type MonitorSourceMeta,
 } from '@/utils/monitor';
 import styles from '@/pages/MonitorPage.module.scss';
 
@@ -26,6 +29,9 @@ interface RequestLogsProps {
   providerTypeMap: Record<string, string>;
   apiFilter: string;
   authIndexMap: Record<string, string>;
+  sourceAuthMap: Record<string, string>;
+  sourceMetaMap: Record<string, MonitorSourceMeta>;
+  onSourceChanged: () => Promise<void>;
 }
 
 interface LogEntry {
@@ -46,6 +52,7 @@ interface LogEntry {
   successRate: number;
   recentRequests: { failed: boolean; timestamp: number }[];
   authIndex: string;
+  sourceRef?: MonitorRequestLogItem['source_ref'];
 }
 
 const ROW_HEIGHT = 40;
@@ -57,6 +64,9 @@ export function RequestLogs({
   providerTypeMap,
   apiFilter,
   authIndexMap,
+  sourceAuthMap,
+  sourceMetaMap,
+  onSourceChanged,
 }: RequestLogsProps) {
   const { t } = useTranslation();
   const [filterApi, setFilterApi] = useState('');
@@ -74,34 +84,9 @@ export function RequestLogs({
 
   const [timeRange, setTimeRange] = useState<TimeRange>(1);
   const [customRange, setCustomRange] = useState<DateRange | undefined>();
-
-  const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
-  const [logLoading, setLogLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [total, setTotal] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
-  const [filterOptions, setFilterOptions] = useState<{
-    apis: string[];
-    models: string[];
-    sources: string[];
-  }>({
-    apis: [],
-    models: [],
-    sources: [],
-  });
-
-  // 使用禁用模型 Hook
-  const {
-    disableState,
-    unsupportedState,
-    disabling,
-    isModelDisabled,
-    handleDisableClick,
-    handleConfirmDisable,
-    handleCancelDisable,
-    handleCloseUnsupported,
-  } = useDisableModel({ providerMap, providerTypeMap });
+  const ensureRequestLogs = useMonitorStore((state) => state.ensureRequestLogs);
 
   const handleScroll = useCallback(() => {
     if (tableContainerRef.current && headerRef.current) {
@@ -118,7 +103,10 @@ export function RequestLogs({
   const toLogEntry = useCallback(
     (item: MonitorRequestLogItem, index: number): LogEntry => {
       const source = item.source || 'unknown';
-      const { provider, masked } = getProviderDisplayParts(source, providerMap);
+      const sourceRef = item.source_ref;
+      const fallbackDisplay = getProviderDisplayParts(source, providerMap);
+      const provider = sourceRef?.display_name || fallbackDisplay.provider;
+      const masked = sourceRef?.display_secret || fallbackDisplay.masked;
       const timestampMs = item.timestamp ? new Date(item.timestamp).getTime() : 0;
       return {
         id: `${item.timestamp}-${item.api_key}-${item.model}-${index}`,
@@ -128,7 +116,7 @@ export function RequestLogs({
         model: item.model,
         source,
         providerName: provider,
-        providerType: providerTypeMap[source] || '--',
+        providerType: sourceRef?.provider_type || providerTypeMap[source] || '--',
         maskedKey: masked,
         failed: item.failed,
         inputTokens: item.input_tokens || 0,
@@ -141,64 +129,50 @@ export function RequestLogs({
           timestamp: req.timestamp ? new Date(req.timestamp).getTime() : 0,
         })),
         authIndex: item.auth_index || '',
+        sourceRef,
       };
     },
     [providerMap, providerTypeMap]
   );
 
-  // 独立获取日志数据
-  const fetchLogData = useCallback(async () => {
-    setLogLoading(true);
-    try {
-      const params = {
-        page,
-        page_size: pageSize,
-        api: filterApi || undefined,
-        api_filter: apiFilter || undefined,
-        model: filterModel || undefined,
-        source: filterSource || undefined,
-        status: filterStatus || undefined,
-        ...buildMonitorTimeRangeParams(timeRange, customRange),
-      };
-
-      const response = await monitorApi.getRequestLogs(params);
-      const items = (response.items || []).map(toLogEntry);
-      setLogEntries(items);
-      setTotal(response.total || 0);
-      setTotalPages(response.total_pages || 0);
-      setFilterOptions((prev) => ({
-        apis: filterApi ? prev.apis : (response.filters?.apis || []),
-        models: filterModel ? prev.models : (response.filters?.models || []),
-        sources: filterSource ? prev.sources : (response.filters?.sources || []),
-      }));
-
-      const safePage = response.page || page;
-      if (safePage !== page) {
-        setPage(safePage);
+  const params = useMemo(
+    () => ({
+      page,
+      page_size: pageSize,
+      api: filterApi || undefined,
+      api_filter: apiFilter || undefined,
+      model: filterModel || undefined,
+      source: filterSource || undefined,
+      status: filterStatus || undefined,
+      ...buildMonitorTimeRangeParams(timeRange, customRange),
+    }),
+    [page, pageSize, filterApi, apiFilter, filterModel, filterSource, filterStatus, timeRange, customRange]
+  );
+  const cacheKey = useMemo(() => serializeMonitorParams(params), [params]);
+  const entry = useMonitorStore((state) => state.requestLogsCache[cacheKey]);
+  const actionSourceMetaMap = useMemo(() => {
+    const nextMap = { ...sourceMetaMap };
+    (entry?.data?.items || []).forEach((item) => {
+      const meta = monitorSourceRefToMeta(item.source_ref);
+      if (meta?.source) {
+        nextMap[meta.source] = meta;
       }
-    } catch (err) {
-      console.error('日志刷新失败：', err);
-      setLogEntries([]);
-      setTotal(0);
-      setTotalPages(0);
-    } finally {
-      setLogLoading(false);
-    }
-  }, [
-    page,
-    pageSize,
-    filterApi,
-    apiFilter,
-    filterModel,
-    filterSource,
-    filterStatus,
-    timeRange,
-    customRange,
-    toLogEntry,
-  ]);
+    });
+    return nextMap;
+  }, [entry?.data?.items, sourceMetaMap]);
+  const { pendingSource, copySourceValue, openEditor, toggleSource, isSourceDisabled } = useMonitorChannelActions({
+    sourceMetaMap: actionSourceMetaMap,
+    onChanged: onSourceChanged,
+  });
+  const fetchLogData = useCallback(
+    async (force = false) => {
+      await ensureRequestLogs(params, force);
+    },
+    [ensureRequestLogs, params]
+  );
 
   useEffect(() => {
-    fetchLogDataRef.current = fetchLogData;
+    fetchLogDataRef.current = () => fetchLogData(true);
   }, [fetchLogData]);
 
   useEffect(() => {
@@ -233,8 +207,25 @@ export function RequestLogs({
   }, [autoRefresh]);
 
   useEffect(() => {
-    fetchLogData();
+    void fetchLogData(refreshKey > 0);
   }, [fetchLogData, refreshKey]);
+
+  const response = entry?.data;
+  const logEntries = useMemo(
+    () => (response?.items || []).map(toLogEntry),
+    [response?.items, toLogEntry]
+  );
+  const logLoading = !response && (entry?.loading ?? true);
+  const total = response?.total || 0;
+  const totalPages = response?.total_pages || 0;
+  const filterOptions = useMemo(
+    () => ({
+      apis: response?.filters?.apis || [],
+      models: response?.filters?.models || [],
+      sources: response?.filters?.sources || [],
+    }),
+    [response]
+  );
 
   const providerTypes = useMemo(() => {
     const typeSet = new Set<string>();
@@ -285,11 +276,24 @@ export function RequestLogs({
   };
 
   const renderRow = (entry: LogEntry) => {
-    const disabled = isModelDisabled(entry.source, entry.model);
-    // 将 authIndex 映射为文件名
     const authDisplayName = entry.authIndex
       ? authIndexMap[entry.authIndex] || entry.authIndex
       : '-';
+    const directMeta = monitorSourceRefToMeta(entry.sourceRef);
+    const resolvedAction = resolveMonitorSourceAction(
+      entry.source,
+      actionSourceMetaMap,
+      authIndexMap,
+      entry.authIndex,
+      sourceAuthMap,
+      providerMap
+    );
+    const fallbackAction =
+      resolvedAction.meta || !directMeta
+        ? resolvedAction
+        : { actionSourceKey: directMeta.source, meta: directMeta };
+    const { actionSourceKey, meta: sourceMeta } = fallbackAction;
+    const disabled = actionSourceKey ? isSourceDisabled(actionSourceKey) : false;
 
     return (
       <>
@@ -298,14 +302,19 @@ export function RequestLogs({
         <td>{entry.providerType}</td>
         <td title={entry.model}>{entry.model}</td>
         <td title={entry.source}>
-          {entry.providerName ? (
-            <>
-              <span className={styles.channelName}>{entry.providerName}</span>
-              <span className={styles.channelSecret}> ({entry.maskedKey})</span>
-            </>
-          ) : (
-            entry.maskedKey
-          )}
+          <div className={styles.channelCell}>
+            <div>
+              {entry.providerName ? (
+                <>
+                  <span className={styles.channelName}>{entry.providerName}</span>
+                  <span className={styles.channelSecret}> ({entry.maskedKey})</span>
+                </>
+              ) : (
+                entry.maskedKey
+              )}
+            </div>
+            {sourceMeta?.summary && <div className={styles.channelMeta}>{sourceMeta.summary}</div>}
+          </div>
         </td>
         <td>
           <span className={`${styles.statusPill} ${entry.failed ? styles.failed : styles.success}`}>
@@ -337,21 +346,37 @@ export function RequestLogs({
         </td>
         <td>{formatTimestamp(entry.timestamp)}</td>
         <td>
-          {entry.source && entry.source !== '-' && entry.source !== 'unknown' ? (
-            disabled ? (
-              <span className={styles.disabledLabel}>{t('monitor.logs.disabled')}</span>
-            ) : (
+          <div className={styles.tableActions}>
+            {actionSourceKey && sourceMeta?.copyValue && (
               <button
-                className={styles.disableBtn}
-                title={t('monitor.logs.disable_model')}
-                onClick={() => handleDisableClick(entry.source, entry.model)}
+                className={styles.actionBtn}
+                onClick={() => void copySourceValue(actionSourceKey)}
               >
-                {t('monitor.logs.disable')}
+                {t('common.copy')}
               </button>
-            )
-          ) : (
-            '-'
-          )}
+            )}
+            {actionSourceKey && sourceMeta?.editPath && (
+              <button
+                className={styles.actionBtn}
+                onClick={() => openEditor(actionSourceKey)}
+              >
+                {t('common.edit')}
+              </button>
+            )}
+            {actionSourceKey && sourceMeta?.canToggle && (
+              <button
+                className={disabled ? styles.enableBtn : styles.disableBtn}
+                onClick={() => void toggleSource(actionSourceKey)}
+                disabled={pendingSource === actionSourceKey}
+              >
+                {pendingSource === actionSourceKey
+                  ? t('common.loading')
+                  : disabled
+                    ? '启用'
+                    : '禁用'}
+              </button>
+            )}
+          </div>
         </td>
       </>
     );
@@ -604,15 +629,6 @@ export function RequestLogs({
           </div>
         )}
       </Card>
-
-      <DisableModelModal
-        disableState={disableState}
-        disabling={disabling}
-        onConfirm={handleConfirmDisable}
-        onCancel={handleCancelDisable}
-      />
-
-      <UnsupportedDisableModal state={unsupportedState} onClose={handleCloseUnsupported} />
     </>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Chart as ChartJS,
@@ -18,8 +18,7 @@ import {
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
-import { useThemeStore } from '@/stores';
-import { providersApi, authFilesApi } from '@/services/api';
+import { useMonitorStore, useThemeStore } from '@/stores';
 import { KpiCards } from '@/components/monitor/KpiCards';
 import { ModelDistributionChart } from '@/components/monitor/ModelDistributionChart';
 import { DailyTrendChart } from '@/components/monitor/DailyTrendChart';
@@ -50,191 +49,81 @@ ChartJS.register(
 // 时间范围选项
 export type TimeRange = 'yesterday' | 'dayBeforeYesterday' | 1 | 7 | 14 | 30;
 
+interface DeferredSectionProps {
+  minHeight?: number;
+  children: ReactNode;
+}
+
+function DeferredSection({ minHeight = 320, children }: DeferredSectionProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (visible) {
+      return;
+    }
+
+    const node = containerRef.current;
+    if (!node) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '320px 0px' }
+    );
+
+    observer.observe(node);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [visible]);
+
+  return (
+    <div ref={containerRef} style={!visible ? { minHeight } : undefined}>
+      {visible ? children : null}
+    </div>
+  );
+}
+
 export function MonitorPage() {
   const { t } = useTranslation();
   const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
+  const providerMetaEntry = useMonitorStore((state) => state.providerMeta);
+  const ensureProviderMeta = useMonitorStore((state) => state.ensureProviderMeta);
   const isDark = resolvedTheme === 'dark';
+  const loading = providerMetaEntry.loading && !providerMetaEntry.updatedAt;
 
-  // 状态
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<TimeRange>(7);
   const [apiFilter, setApiFilter] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
-  const [providerMap, setProviderMap] = useState<Record<string, string>>({});
-  const [providerModels, setProviderModels] = useState<Record<string, Set<string>>>({});
-  const [providerTypeMap, setProviderTypeMap] = useState<Record<string, string>>({});
-  const [authIndexMap, setAuthIndexMap] = useState<Record<string, string>>({});
+  const loadProviderMeta = useCallback(
+    async (force = false) => {
+      try {
+        await ensureProviderMeta(force);
+      } catch (err) {
+        console.error('Monitor: Error loading provider meta:', err);
+      }
+    },
+    [ensureProviderMeta]
+  );
 
-  // 加载渠道名称映射（支持所有提供商类型）
-  const loadProviderMap = useCallback(async () => {
-    try {
-      const map: Record<string, string> = {};
-      const modelsMap: Record<string, Set<string>> = {};
-      const typeMap: Record<string, string> = {};
+  const handleRefreshAll = useCallback(async () => {
+    await loadProviderMeta(true);
+    setRefreshKey((k) => k + 1);
+  }, [loadProviderMeta]);
 
-      // 并行加载所有提供商配置
-      const [openaiProviders, geminiKeys, claudeConfigs, codexConfigs, vertexConfigs, authFilesRes] = await Promise.all([
-        providersApi.getOpenAIProviders().catch(() => []),
-        providersApi.getGeminiKeys().catch(() => []),
-        providersApi.getClaudeConfigs().catch(() => []),
-        providersApi.getCodexConfigs().catch(() => []),
-        providersApi.getVertexConfigs().catch(() => []),
-        authFilesApi.list().catch(() => ({ files: [] })),
-      ]);
-
-      // 处理 OpenAI 兼容提供商
-      openaiProviders.forEach((provider) => {
-        const providerName = provider.headers?.['X-Provider'] || provider.name || 'unknown';
-        const modelSet = new Set<string>();
-        (provider.models || []).forEach((m) => {
-          if (m.alias) modelSet.add(m.alias);
-          if (m.name) modelSet.add(m.name);
-        });
-        const apiKeyEntries = provider.apiKeyEntries || [];
-        apiKeyEntries.forEach((entry) => {
-          const apiKey = entry.apiKey;
-          if (apiKey) {
-            map[apiKey] = providerName;
-            modelsMap[apiKey] = modelSet;
-            typeMap[apiKey] = 'OpenAI';
-          }
-        });
-        if (provider.name) {
-          map[provider.name] = providerName;
-          modelsMap[provider.name] = modelSet;
-          typeMap[provider.name] = 'OpenAI';
-        }
-      });
-
-      // 处理 Gemini 提供商
-      geminiKeys.forEach((config) => {
-        const apiKey = config.apiKey;
-        if (apiKey) {
-          const providerName = config.prefix?.trim() || 'Gemini';
-          map[apiKey] = providerName;
-          typeMap[apiKey] = 'Gemini';
-        }
-      });
-
-      // 处理 Claude 提供商
-      claudeConfigs.forEach((config) => {
-        const apiKey = config.apiKey;
-        if (apiKey) {
-          const providerName = config.prefix?.trim() || 'Claude';
-          map[apiKey] = providerName;
-          typeMap[apiKey] = 'Claude';
-          // 存储模型集合
-          if (config.models && config.models.length > 0) {
-            const modelSet = new Set<string>();
-            config.models.forEach((m) => {
-              if (m.alias) modelSet.add(m.alias);
-              if (m.name) modelSet.add(m.name);
-            });
-            modelsMap[apiKey] = modelSet;
-          }
-        }
-      });
-
-      // 处理 Codex 提供商
-      codexConfigs.forEach((config) => {
-        const apiKey = config.apiKey;
-        if (apiKey) {
-          const providerName = config.prefix?.trim() || 'Codex';
-          map[apiKey] = providerName;
-          typeMap[apiKey] = 'Codex';
-          if (config.models && config.models.length > 0) {
-            const modelSet = new Set<string>();
-            config.models.forEach((m) => {
-              if (m.alias) modelSet.add(m.alias);
-              if (m.name) modelSet.add(m.name);
-            });
-            modelsMap[apiKey] = modelSet;
-          }
-        }
-      });
-
-      // 处理 Vertex 提供商
-      vertexConfigs.forEach((config) => {
-        const apiKey = config.apiKey;
-        if (apiKey) {
-          const providerName = config.prefix?.trim() || 'Vertex';
-          map[apiKey] = providerName;
-          typeMap[apiKey] = 'Vertex';
-          if (config.models && config.models.length > 0) {
-            const modelSet = new Set<string>();
-            config.models.forEach((m) => {
-              if (m.alias) modelSet.add(m.alias);
-              if (m.name) modelSet.add(m.name);
-            });
-            modelsMap[apiKey] = modelSet;
-          }
-        }
-      });
-
-      // 处理 OAuth 认证文件
-      const authTypeToProvider: Record<string, string> = {
-        claude: 'Claude',
-        gemini: 'Gemini',
-        'gemini-cli': 'Gemini',
-        codex: 'Codex',
-        vertex: 'Vertex',
-        aistudio: 'AI Studio',
-        qwen: 'Qwen',
-        antigravity: 'Antigravity',
-        iflow: 'iFlow',
-      };
-      const authFiles = authFilesRes?.files || [];
-      const authIdxMap: Record<string, string> = {};
-      authFiles.forEach((file) => {
-        const name = file.name;
-        if (!name) return;
-        const fileType = file.type || 'unknown';
-        const providerName = authTypeToProvider[fileType] || fileType;
-        map[name] = providerName;
-        typeMap[name] = providerName;
-        // auth_index → 文件名映射（供 RequestLogs 使用）
-        const rawAuthIndex = (file as Record<string, unknown>)['auth_index'] ?? file.authIndex;
-        if (rawAuthIndex !== undefined && rawAuthIndex !== null) {
-          const authIndexKey = String(rawAuthIndex).trim();
-          if (authIndexKey) {
-            authIdxMap[authIndexKey] = name;
-          }
-        }
-      });
-
-      setProviderMap(map);
-      setProviderModels(modelsMap);
-      setProviderTypeMap(typeMap);
-      setAuthIndexMap(authIdxMap);
-    } catch (err) {
-      console.warn('Monitor: Failed to load provider map:', err);
-    }
-  }, []);
-
-  // 加载数据
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      await loadProviderMap();
-      setRefreshKey((k) => k + 1);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : t('common.unknown_error');
-      console.error('Monitor: Error loading data:', err);
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  }, [t, loadProviderMap]);
-
-  // 初始加载
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    void loadProviderMeta(false);
+  }, [loadProviderMeta]);
 
-  // 响应头部刷新
-  useHeaderRefresh(loadData);
+  useHeaderRefresh(handleRefreshAll);
 
   // 处理时间范围变化
   const handleTimeRangeChange = (range: TimeRange) => {
@@ -264,7 +153,7 @@ export function MonitorPage() {
           <Button
             variant="secondary"
             size="sm"
-            onClick={loadData}
+            onClick={handleRefreshAll}
             disabled={loading}
           >
             {loading ? t('common.loading') : t('common.refresh')}
@@ -273,7 +162,7 @@ export function MonitorPage() {
       </div>
 
       {/* 错误提示 */}
-      {error && <div className={styles.errorBox}>{error}</div>}
+      {providerMetaEntry.error && <div className={styles.errorBox}>{providerMetaEntry.error}</div>}
 
       {/* 时间范围和 API 过滤 */}
       <div className={styles.filters}>
@@ -319,36 +208,56 @@ export function MonitorPage() {
       </div>
 
       {/* KPI 卡片 */}
-      <KpiCards timeRange={timeRange} apiFilter={apiFilter} />
+      <KpiCards timeRange={timeRange} apiFilter={apiFilter} refreshKey={refreshKey} />
 
       {/* 图表区域 */}
       <div className={styles.chartsGrid}>
-        <ModelDistributionChart timeRange={timeRange} apiFilter={apiFilter} isDark={isDark} />
-        <DailyTrendChart timeRange={timeRange} apiFilter={apiFilter} isDark={isDark} />
+        <ModelDistributionChart timeRange={timeRange} apiFilter={apiFilter} isDark={isDark} refreshKey={refreshKey} />
+        <DailyTrendChart timeRange={timeRange} apiFilter={apiFilter} isDark={isDark} refreshKey={refreshKey} />
       </div>
 
       {/* 小时级图表 */}
-      <HourlyModelChart timeRange={timeRange} apiFilter={apiFilter} isDark={isDark} />
-      <HourlyTokenChart timeRange={timeRange} apiFilter={apiFilter} isDark={isDark} />
+      <HourlyModelChart timeRange={timeRange} apiFilter={apiFilter} isDark={isDark} refreshKey={refreshKey} />
+      <HourlyTokenChart timeRange={timeRange} apiFilter={apiFilter} isDark={isDark} refreshKey={refreshKey} />
 
       {/* 服务健康热力图 */}
-      <ServiceHealthCard />
+      <ServiceHealthCard refreshKey={refreshKey} />
 
       {/* 统计表格 */}
-      <div className={styles.statsGrid}>
-        <ChannelStats refreshKey={refreshKey} loading={loading} providerMap={providerMap} providerModels={providerModels} />
-        <FailureAnalysis refreshKey={refreshKey} loading={loading} providerMap={providerMap} providerModels={providerModels} />
-      </div>
+      <DeferredSection minHeight={520}>
+        <div className={styles.statsGrid}>
+          <ChannelStats
+            refreshKey={refreshKey}
+            loading={providerMetaEntry.loading}
+            providerMap={providerMetaEntry.data?.providerMap || {}}
+            sourceAuthMap={providerMetaEntry.data?.sourceAuthMap || {}}
+            sourceMetaMap={providerMetaEntry.data?.sourceMetaMap || {}}
+            onSourceChanged={handleRefreshAll}
+          />
+          <FailureAnalysis
+            refreshKey={refreshKey}
+            loading={providerMetaEntry.loading}
+            providerMap={providerMetaEntry.data?.providerMap || {}}
+            sourceAuthMap={providerMetaEntry.data?.sourceAuthMap || {}}
+            sourceMetaMap={providerMetaEntry.data?.sourceMetaMap || {}}
+            onSourceChanged={handleRefreshAll}
+          />
+        </div>
+      </DeferredSection>
 
-      {/* 请求日志 */}
-      <RequestLogs
-        refreshKey={refreshKey}
-        loading={loading}
-        providerMap={providerMap}
-        providerTypeMap={providerTypeMap}
-        apiFilter={apiFilter}
-        authIndexMap={authIndexMap}
-      />
+      <DeferredSection minHeight={640}>
+        <RequestLogs
+          refreshKey={refreshKey}
+          loading={providerMetaEntry.loading}
+          providerMap={providerMetaEntry.data?.providerMap || {}}
+          providerTypeMap={providerMetaEntry.data?.providerTypeMap || {}}
+          apiFilter={apiFilter}
+          authIndexMap={providerMetaEntry.data?.authIndexMap || {}}
+          sourceAuthMap={providerMetaEntry.data?.sourceAuthMap || {}}
+          sourceMetaMap={providerMetaEntry.data?.sourceMetaMap || {}}
+          onSourceChanged={handleRefreshAll}
+        />
+      </DeferredSection>
     </div>
   );
 }

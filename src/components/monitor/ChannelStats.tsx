@@ -1,16 +1,20 @@
 import { useMemo, useState, useCallback, Fragment, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
-import { monitorApi, type MonitorChannelStatsItem } from '@/services/api';
-import { useDisableModel } from '@/hooks';
+import type { MonitorChannelStatsItem } from '@/services/api';
+import { useMonitorChannelActions } from '@/hooks';
+import { useMonitorStore } from '@/stores';
+import { serializeMonitorParams } from '@/stores/useMonitorStore';
 import { TimeRangeSelector, type TimeRange } from './TimeRangeSelector';
-import { DisableModelModal } from './DisableModelModal';
 import {
   formatTimestamp,
   getRateClassName,
   getProviderDisplayParts,
   buildMonitorTimeRangeParams,
+  monitorSourceRefToMeta,
+  resolveMonitorSourceAction,
   type DateRange,
+  type MonitorSourceMeta,
 } from '@/utils/monitor';
 import styles from '@/pages/MonitorPage.module.scss';
 
@@ -18,7 +22,9 @@ interface ChannelStatsProps {
   refreshKey: number;
   loading: boolean;
   providerMap: Record<string, string>;
-  providerModels: Record<string, Set<string>>;
+  sourceAuthMap: Record<string, string>;
+  sourceMetaMap: Record<string, MonitorSourceMeta>;
+  onSourceChanged: () => Promise<void>;
 }
 
 interface ModelStat {
@@ -42,14 +48,17 @@ interface ChannelStat {
   lastRequestTime: number;
   recentRequests: { failed: boolean; timestamp: number }[];
   models: Record<string, ModelStat>;
+  sourceRef?: MonitorChannelStatsItem['source_ref'];
 }
 
-interface ChannelFilterOption {
-  source: string;
-  label: string;
-}
-
-export function ChannelStats({ refreshKey, loading, providerMap, providerModels }: ChannelStatsProps) {
+export function ChannelStats({
+  refreshKey,
+  loading,
+  providerMap,
+  sourceAuthMap,
+  sourceMetaMap,
+  onSourceChanged,
+}: ChannelStatsProps) {
   const { t } = useTranslation();
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
   const [filterChannel, setFilterChannel] = useState('');
@@ -58,19 +67,7 @@ export function ChannelStats({ refreshKey, loading, providerMap, providerModels 
 
   const [timeRange, setTimeRange] = useState<TimeRange>(1);
   const [customRange, setCustomRange] = useState<DateRange | undefined>();
-
-  const [channelStats, setChannelStats] = useState<ChannelStat[]>([]);
-  const [filters, setFilters] = useState<{ channels: ChannelFilterOption[]; models: string[] }>({ channels: [], models: [] });
-  const [statsLoading, setStatsLoading] = useState(false);
-
-  const {
-    disableState,
-    disabling,
-    isModelDisabled,
-    handleDisableClick: onDisableClick,
-    handleConfirmDisable,
-    handleCancelDisable,
-  } = useDisableModel({ providerMap, providerModels });
+  const ensureChannelStats = useMonitorStore((state) => state.ensureChannelStats);
 
   const handleTimeRangeChange = useCallback((range: TimeRange, custom?: DateRange) => {
     setTimeRange(range);
@@ -85,7 +82,9 @@ export function ChannelStats({ refreshKey, loading, providerMap, providerModels 
 
   const mapChannelStat = useCallback((item: MonitorChannelStatsItem): ChannelStat => {
     const source = item.source || 'unknown';
-    const { provider, masked } = getProviderDisplayParts(source, providerMap);
+    const fallbackDisplay = getProviderDisplayParts(source, providerMap);
+    const provider = item.source_ref?.display_name || fallbackDisplay.provider;
+    const masked = item.source_ref?.display_secret || fallbackDisplay.masked;
     const displayName = provider ? `${provider} (${masked})` : masked;
 
     const models: Record<string, ModelStat> = {};
@@ -118,51 +117,69 @@ export function ChannelStats({ refreshKey, loading, providerMap, providerModels 
         timestamp: req.timestamp ? new Date(req.timestamp).getTime() : 0,
       })),
       models,
+      sourceRef: item.source_ref,
     };
   }, [providerMap]);
 
-  const loadChannelStats = useCallback(async () => {
-    setStatsLoading(true);
-    try {
-      const response = await monitorApi.getChannelStats({
-        limit: 10,
-        source: filterChannel || undefined,
-        status: filterStatus || undefined,
-        model: filterModel || undefined,
-        ...buildMonitorTimeRangeParams(timeRange, customRange),
-      });
-      const mapped = (response.items || []).map(mapChannelStat);
-      setChannelStats(mapped);
-
-      const sourceSet = new Set<string>(
-        (response.filters?.sources && response.filters.sources.length > 0)
-          ? response.filters.sources
-          : mapped.map((stat) => stat.source)
-      );
-      const channels = Array.from(sourceSet)
-        .filter((source) => !!source)
-        .map((source) => ({ source, label: formatChannelLabel(source) }))
-        .sort((a, b) => a.label.localeCompare(b.label, 'zh-Hans-CN'));
-
-      const modelSet = new Set<string>(
-        (response.filters?.models && response.filters.models.length > 0)
-          ? response.filters.models
-          : mapped.flatMap((stat) => Object.keys(stat.models))
-      );
-
-      setFilters({ channels, models: Array.from(modelSet).sort() });
-    } catch (err) {
-      console.error('渠道统计加载失败：', err);
-      setChannelStats([]);
-      setFilters({ channels: [], models: [] });
-    } finally {
-      setStatsLoading(false);
-    }
-  }, [filterChannel, filterStatus, filterModel, timeRange, customRange, mapChannelStat, formatChannelLabel]);
+  const params = useMemo(
+    () => ({
+      limit: 10,
+      source: filterChannel || undefined,
+      status: filterStatus || undefined,
+      model: filterModel || undefined,
+      ...buildMonitorTimeRangeParams(timeRange, customRange),
+    }),
+    [filterChannel, filterStatus, filterModel, timeRange, customRange]
+  );
+  const cacheKey = useMemo(() => serializeMonitorParams(params), [params]);
+  const entry = useMonitorStore((state) => state.channelStatsCache[cacheKey]);
+  const actionSourceMetaMap = useMemo(() => {
+    const nextMap = { ...sourceMetaMap };
+    (entry?.data?.items || []).forEach((item) => {
+      const meta = monitorSourceRefToMeta(item.source_ref);
+      if (meta?.source) {
+        nextMap[meta.source] = meta;
+      }
+    });
+    return nextMap;
+  }, [entry?.data?.items, sourceMetaMap]);
+  const { pendingSource, copySourceValue, openEditor, toggleSource, isSourceDisabled } =
+    useMonitorChannelActions({
+      sourceMetaMap: actionSourceMetaMap,
+      onChanged: onSourceChanged,
+    });
 
   useEffect(() => {
-    loadChannelStats();
-  }, [loadChannelStats, refreshKey]);
+    void ensureChannelStats(params, refreshKey > 0);
+  }, [ensureChannelStats, params, refreshKey]);
+
+  const channelStats = useMemo(
+    () => (entry?.data?.items || []).map(mapChannelStat),
+    [entry?.data?.items, mapChannelStat]
+  );
+
+  const filters = useMemo(() => {
+    const response = entry?.data;
+    const sourceSet = new Set<string>(
+      response?.filters?.sources && response.filters.sources.length > 0
+        ? response.filters.sources
+        : channelStats.map((stat) => stat.source)
+    );
+    const channels = Array.from(sourceSet)
+      .filter((source) => !!source)
+      .map((source) => ({ source, label: formatChannelLabel(source) }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'zh-Hans-CN'));
+
+    const modelSet = new Set<string>(
+      response?.filters?.models && response.filters.models.length > 0
+        ? response.filters.models
+        : channelStats.flatMap((stat) => Object.keys(stat.models))
+    );
+
+    return { channels, models: Array.from(modelSet).sort() };
+  }, [entry?.data, channelStats, formatChannelLabel]);
+
+  const statsLoading = !entry?.data && (entry?.loading ?? true);
 
   const filteredStats = useMemo(() => {
     return channelStats.filter((stat) => {
@@ -179,11 +196,6 @@ export function ChannelStats({ refreshKey, loading, providerMap, providerModels 
 
   const toggleExpand = (source: string) => {
     setExpandedChannel(expandedChannel === source ? null : source);
-  };
-
-  const handleDisableClick = (source: string, model: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    onDisableClick(source, model);
   };
 
   return (
@@ -245,24 +257,51 @@ export function ChannelStats({ refreshKey, loading, providerMap, providerModels 
                   <th>{t('monitor.channel.header_rate')}</th>
                   <th>{t('monitor.channel.header_recent')}</th>
                   <th>{t('monitor.channel.header_time')}</th>
+                  <th>{t('monitor.logs.header_actions')}</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredStats.map((stat) => (
+                {filteredStats.map((stat) => {
+                  const directMeta = monitorSourceRefToMeta(stat.sourceRef);
+                  const resolvedAction = resolveMonitorSourceAction(
+                    stat.source,
+                    actionSourceMetaMap,
+                    undefined,
+                    undefined,
+                    sourceAuthMap,
+                    providerMap
+                  );
+                  const fallbackAction =
+                    resolvedAction.meta || !directMeta
+                      ? resolvedAction
+                      : { actionSourceKey: directMeta.source, meta: directMeta };
+                  const actionSourceKey = fallbackAction.actionSourceKey;
+                  const sourceMeta = fallbackAction.meta;
+                  const hasActions = Boolean(actionSourceKey && sourceMeta);
+                  const disabled = actionSourceKey ? isSourceDisabled(actionSourceKey) : false;
+
+                  return (
                   <Fragment key={stat.source}>
                     <tr
                       className={styles.expandable}
                       onClick={() => toggleExpand(stat.source)}
                     >
                       <td>
-                        {stat.providerName ? (
-                          <>
-                            <span className={styles.channelName}>{stat.providerName}</span>
-                            <span className={styles.channelSecret}> ({stat.maskedKey})</span>
-                          </>
-                        ) : (
-                          stat.maskedKey
-                        )}
+                        <div className={styles.channelCell}>
+                          <div>
+                            {stat.providerName ? (
+                              <>
+                                <span className={styles.channelName}>{stat.providerName}</span>
+                                <span className={styles.channelSecret}> ({stat.maskedKey})</span>
+                              </>
+                            ) : (
+                              stat.maskedKey
+                            )}
+                          </div>
+                          {sourceMeta?.summary && (
+                            <div className={styles.channelMeta}>{sourceMeta.summary}</div>
+                          )}
+                        </div>
                       </td>
                       <td>{stat.totalRequests.toLocaleString()}</td>
                       <td className={getRateClassName(stat.successRate, styles)}>
@@ -279,10 +318,43 @@ export function ChannelStats({ refreshKey, loading, providerMap, providerModels 
                         </div>
                       </td>
                       <td>{formatTimestamp(stat.lastRequestTime)}</td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <div className={styles.tableActions}>
+                          {hasActions && sourceMeta?.copyValue && (
+                            <button
+                              className={styles.actionBtn}
+                              onClick={() => void copySourceValue(actionSourceKey)}
+                            >
+                              {t('common.copy')}
+                            </button>
+                          )}
+                          {hasActions && sourceMeta?.editPath && (
+                            <button
+                              className={styles.actionBtn}
+                              onClick={() => openEditor(actionSourceKey)}
+                            >
+                              {t('common.edit')}
+                            </button>
+                          )}
+                          {hasActions && sourceMeta?.canToggle && (
+                            <button
+                              className={disabled ? styles.enableBtn : styles.disableBtn}
+                              onClick={() => void toggleSource(actionSourceKey)}
+                              disabled={pendingSource === actionSourceKey}
+                            >
+                              {pendingSource === actionSourceKey
+                                ? t('common.loading')
+                                : disabled
+                                  ? '启用'
+                                  : '禁用'}
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                     {expandedChannel === stat.source && (
                       <tr key={`${stat.source}-detail`}>
-                        <td colSpan={5} className={styles.expandDetail}>
+                        <td colSpan={6} className={styles.expandDetail}>
                           <div className={styles.expandTableWrapper}>
                             <table className={styles.table}>
                               <thead>
@@ -293,21 +365,20 @@ export function ChannelStats({ refreshKey, loading, providerMap, providerModels 
                                   <th>{t('monitor.channel.success')}/{t('monitor.channel.failed')}</th>
                                   <th>{t('monitor.channel.header_recent')}</th>
                                   <th>{t('monitor.channel.header_time')}</th>
-                                  <th>{t('monitor.logs.header_actions')}</th>
+                                  <th>{t('common.status')}</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {Object.entries(stat.models)
                                   .sort((a, b) => {
-                                    const aDisabled = isModelDisabled(stat.source, a[0]);
-                                    const bDisabled = isModelDisabled(stat.source, b[0]);
+                                    const aDisabled = disabled;
+                                    const bDisabled = disabled;
                                     if (aDisabled !== bDisabled) {
                                       return aDisabled ? 1 : -1;
                                     }
                                     return b[1].requests - a[1].requests;
                                   })
                                   .map(([modelName, modelStat]) => {
-                                    const disabled = isModelDisabled(stat.source, modelName);
                                     return (
                                       <tr key={modelName} className={disabled ? styles.modelDisabled : ''}>
                                         <td>{modelName}</td>
@@ -331,18 +402,7 @@ export function ChannelStats({ refreshKey, loading, providerMap, providerModels 
                                           </div>
                                         </td>
                                         <td>{formatTimestamp(modelStat.lastTimestamp)}</td>
-                                        <td>
-                                          {disabled ? (
-                                            <span className={styles.disabledLabel}>{t('monitor.logs.removed')}</span>
-                                          ) : stat.source && stat.source !== '-' && stat.source !== 'unknown' ? (
-                                            <button
-                                              className={styles.disableBtn}
-                                              onClick={(e) => handleDisableClick(stat.source, modelName, e)}
-                                            >
-                                              {t('monitor.logs.disable')}
-                                            </button>
-                                          ) : '-'}
-                                        </td>
+                                        <td>-</td>
                                       </tr>
                                     );
                                   })}
@@ -353,19 +413,12 @@ export function ChannelStats({ refreshKey, loading, providerMap, providerModels 
                       </tr>
                     )}
                   </Fragment>
-                ))}
+                )})}
               </tbody>
             </table>
           )}
         </div>
       </Card>
-
-      <DisableModelModal
-        disableState={disableState}
-        disabling={disabling}
-        onConfirm={handleConfirmDisable}
-        onCancel={handleCancelDisable}
-      />
     </>
   );
 }
