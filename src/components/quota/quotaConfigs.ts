@@ -96,7 +96,7 @@ const DEFAULT_ANTIGRAVITY_PROJECT_ID = 'bamboo-precept-lgxtn';
 const geminiCliSupplementaryRequestIds = new Map<string, number>();
 const geminiCliSupplementaryCache = new Map<
   string,
-  { requestId: number; tierLabel: string | null; creditBalance: number | null }
+  { requestId: number; tierLabel: string | null; tierId: string | null; creditBalance: number | null }
 >();
 
 export interface QuotaStore {
@@ -455,6 +455,8 @@ const GEMINI_CLI_TIER_LABELS: Record<string, string> = {
   'free-tier': 'tier_free',
   'legacy-tier': 'tier_legacy',
   'standard-tier': 'tier_standard',
+  'g1-pro-tier': 'tier_pro',
+  'g1-ultra-tier': 'tier_ultra',
 };
 
 const resolveGeminiCliTierLabel = (
@@ -466,10 +468,23 @@ const resolveGeminiCliTierLabel = (
     payload.currentTier ?? payload.current_tier;
   const paidTier: GeminiCliUserTier | null | undefined =
     payload.paidTier ?? payload.paid_tier;
-  const tierId = normalizeStringValue(paidTier?.id) ?? normalizeStringValue(currentTier?.id);
-  if (!tierId) return null;
+  const rawId = normalizeStringValue(paidTier?.id) ?? normalizeStringValue(currentTier?.id);
+  if (!rawId) return null;
+  const tierId = rawId.toLowerCase();
   const labelKey = GEMINI_CLI_TIER_LABELS[tierId];
-  return labelKey ? t(`gemini_cli_quota.${labelKey}`) : tierId;
+  return labelKey ? t(`gemini_cli_quota.${labelKey}`) : rawId;
+};
+
+const resolveGeminiCliTierId = (
+  payload: GeminiCliCodeAssistPayload | null
+): string | null => {
+  if (!payload) return null;
+  const currentTier: GeminiCliUserTier | null | undefined =
+    payload.currentTier ?? payload.current_tier;
+  const paidTier: GeminiCliUserTier | null | undefined =
+    payload.paidTier ?? payload.paid_tier;
+  const rawId = normalizeStringValue(paidTier?.id) ?? normalizeStringValue(currentTier?.id);
+  return rawId ? rawId.toLowerCase() : null;
 };
 
 const resolveGeminiCliCreditBalance = (
@@ -502,7 +517,7 @@ const fetchGeminiCliCodeAssist = async (
   authIndex: string,
   projectId: string,
   t: TFunction
-): Promise<{ tierLabel: string | null; creditBalance: number | null }> => {
+): Promise<{ tierLabel: string | null; tierId: string | null; creditBalance: number | null }> => {
   try {
     const result = await apiCallApi.request({
       authIndex,
@@ -521,30 +536,32 @@ const fetchGeminiCliCodeAssist = async (
     });
 
     if (result.statusCode < 200 || result.statusCode >= 300) {
-      return { tierLabel: null, creditBalance: null };
+      return { tierLabel: null, tierId: null, creditBalance: null };
     }
 
     const payload = parseGeminiCliCodeAssistPayload(result.body ?? result.bodyText);
     return {
       tierLabel: resolveGeminiCliTierLabel(payload, t),
+      tierId: resolveGeminiCliTierId(payload),
       creditBalance: resolveGeminiCliCreditBalance(payload),
     };
   } catch {
-    return { tierLabel: null, creditBalance: null };
+    return { tierLabel: null, tierId: null, creditBalance: null };
   }
 };
 
 const readGeminiCliSupplementarySnapshot = (
   fileName: string,
   requestId: number
-): { tierLabel: string | null; creditBalance: number | null } => {
+): { tierLabel: string | null; tierId: string | null; creditBalance: number | null } => {
   const cached = geminiCliSupplementaryCache.get(fileName);
   if (!cached || cached.requestId !== requestId) {
-    return { tierLabel: null, creditBalance: null };
+    return { tierLabel: null, tierId: null, creditBalance: null };
   }
 
   return {
     tierLabel: cached.tierLabel,
+    tierId: cached.tierId,
     creditBalance: cached.creditBalance,
   };
 };
@@ -575,6 +592,7 @@ const scheduleGeminiCliSupplementaryRefresh = (
 
       if (
         current.tierLabel === supplementary.tierLabel &&
+        current.tierId === supplementary.tierId &&
         current.creditBalance === supplementary.creditBalance
       ) {
         return prev;
@@ -585,6 +603,7 @@ const scheduleGeminiCliSupplementaryRefresh = (
         [fileName]: {
           ...current,
           tierLabel: supplementary.tierLabel,
+          tierId: supplementary.tierId,
           creditBalance: supplementary.creditBalance,
         },
       };
@@ -602,6 +621,7 @@ const fetchGeminiCliQuota = async (
   supplementaryRequestId: number;
   buckets: GeminiCliQuotaBucketState[];
   tierLabel: string | null;
+  tierId: string | null;
   creditBalance: number | null;
 }> => {
   const rawAuthIndex = file['auth_index'] ?? file.authIndex;
@@ -675,6 +695,7 @@ const fetchGeminiCliQuota = async (
     supplementaryRequestId,
     buckets: builtBuckets,
     tierLabel: supplementarySnapshot.tierLabel,
+    tierId: supplementarySnapshot.tierId,
     creditBalance: supplementarySnapshot.creditBalance,
   };
 };
@@ -716,6 +737,8 @@ const renderAntigravityItems = (
   });
 };
 
+const PREMIUM_GEMINI_CLI_TIER_IDS = new Set(['g1-ultra-tier']);
+
 const renderCodexItems = (
   quota: CodexQuotaState,
   t: TFunction,
@@ -729,6 +752,7 @@ const renderCodexItems = (
   const getPlanLabel = (pt?: string | null): string | null => {
     const normalized = normalizePlanType(pt);
     if (!normalized) return null;
+    if (normalized === 'pro') return t('codex_quota.plan_pro');
     if (normalized === 'plus') return t('codex_quota.plan_plus');
     if (normalized === 'team') return t('codex_quota.plan_team');
     if (normalized === 'free') return t('codex_quota.plan_free');
@@ -736,15 +760,17 @@ const renderCodexItems = (
   };
 
   const planLabel = getPlanLabel(planType);
+  const isPremiumPlan = normalizePlanType(planType) === 'pro';
   const nodes: ReactNode[] = [];
 
   if (planLabel) {
+    const valueClass = isPremiumPlan ? styleMap.premiumPlanValue : styleMap.codexPlanValue;
     nodes.push(
       h(
         'div',
         { key: 'plan', className: styleMap.codexPlan },
         h('span', { className: styleMap.codexPlanLabel }, t('codex_quota.plan_label')),
-        h('span', { className: styleMap.codexPlanValue }, planLabel)
+        h('span', { className: valueClass }, planLabel)
       )
     );
   }
@@ -797,16 +823,19 @@ const renderGeminiCliItems = (
   const { createElement: h, Fragment } = React;
   const buckets = quota.buckets ?? [];
   const tierLabel = quota.tierLabel ?? null;
+  const tierId = quota.tierId ?? null;
   const creditBalance = quota.creditBalance ?? null;
+  const isPremiumTier = tierId !== null && PREMIUM_GEMINI_CLI_TIER_IDS.has(tierId);
   const nodes: ReactNode[] = [];
 
   if (tierLabel) {
+    const valueClass = isPremiumTier ? styleMap.premiumPlanValue : styleMap.codexPlanValue;
     nodes.push(
       h(
         'div',
         { key: 'tier', className: styleMap.codexPlan },
         h('span', { className: styleMap.codexPlanLabel }, t('gemini_cli_quota.tier_label')),
-        h('span', { className: styleMap.codexPlanValue }, tierLabel)
+        h('span', { className: valueClass }, tierLabel)
       )
     );
   }
@@ -1159,6 +1188,7 @@ export const GEMINI_CLI_CONFIG: QuotaConfig<
     supplementaryRequestId: number;
     buckets: GeminiCliQuotaBucketState[];
     tierLabel: string | null;
+    tierId: string | null;
     creditBalance: number | null;
   }
 > = {
@@ -1170,7 +1200,7 @@ export const GEMINI_CLI_CONFIG: QuotaConfig<
   fetchQuota: fetchGeminiCliQuota,
   storeSelector: (state) => state.geminiCliQuota,
   storeSetter: 'setGeminiCliQuota',
-  buildLoadingState: () => ({ status: 'loading', buckets: [], tierLabel: null, creditBalance: null }),
+  buildLoadingState: () => ({ status: 'loading', buckets: [], tierLabel: null, tierId: null, creditBalance: null }),
   buildSuccessState: (data) => {
     const supplementarySnapshot = readGeminiCliSupplementarySnapshot(
       data.fileName,
@@ -1181,6 +1211,7 @@ export const GEMINI_CLI_CONFIG: QuotaConfig<
       status: 'success',
       buckets: data.buckets,
       tierLabel: supplementarySnapshot.tierLabel ?? data.tierLabel,
+      tierId: supplementarySnapshot.tierId ?? data.tierId,
       creditBalance: supplementarySnapshot.creditBalance ?? data.creditBalance,
     };
   },
