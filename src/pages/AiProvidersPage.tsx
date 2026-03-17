@@ -60,7 +60,7 @@ export function AiProvidersPage() {
   const disableControls = connectionStatus !== 'connected';
   const isSwitching = Boolean(configSwitchingKey);
 
-  const { keyStats, usageDetails, loadKeyStats, refreshKeyStats } = useProviderStats();
+  const { keyStats, usageDetails, statusBarBySource, loadKeyStats, refreshKeyStats } = useProviderStats();
 
   const getErrorMessage = (err: unknown) => {
     if (err instanceof Error) return err.message;
@@ -453,11 +453,10 @@ export function AiProvidersPage() {
           <CodexSection
             configs={codexConfigs}
             keyStats={keyStats}
-            usageDetails={usageDetails}
+            statusBarBySource={statusBarBySource}
             loading={loading}
             disableControls={disableControls}
             isSwitching={isSwitching}
-            resolvedTheme={resolvedTheme}
             onAdd={() => openEditor('/ai-providers/codex/new')}
             onEdit={(index) => openEditor(`/ai-providers/codex/${index}`)}
             onDelete={(index) => void deleteProviderEntry('codex', index)}
