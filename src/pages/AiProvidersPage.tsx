@@ -468,7 +468,7 @@ export function AiProvidersPage() {
           <ClaudeSection
             configs={claudeConfigs}
             keyStats={keyStats}
-            usageDetails={usageDetails}
+            statusBarBySource={statusBarBySource}
             loading={loading}
             disableControls={disableControls}
             isSwitching={isSwitching}
