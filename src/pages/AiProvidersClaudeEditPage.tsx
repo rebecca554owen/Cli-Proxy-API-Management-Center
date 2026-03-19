@@ -567,36 +567,44 @@ export function AiProvidersClaudeEditPage() {
                       availableModels.length === 0
                     }
                   />
-                  <Button
-                    variant={testStatus === 'error' ? 'danger' : 'secondary'}
-                    size="sm"
-                    onClick={() => void runClaudeConnectivityTest()}
-                    loading={testStatus === 'loading'}
-                    disabled={
-                      saving ||
-                      disableControls ||
-                      isTesting ||
-                      testStatus === 'loading' ||
-                      availableModels.length === 0
-                    }
-                    className={styles.modelTestAllButton}
-                  >
-                    {t('ai_providers.claude_test_action')}
-                  </Button>
+                  <div className={styles.modelTestPanelActions}>
+                    <Button
+                      variant={testStatus === 'error' ? 'danger' : 'secondary'}
+                      size="sm"
+                      onClick={() => void runClaudeConnectivityTest()}
+                      loading={testStatus === 'loading'}
+                      disabled={
+                        saving ||
+                        disableControls ||
+                        isTesting ||
+                        testStatus === 'loading' ||
+                        availableModels.length === 0
+                      }
+                      className={`${styles.modelTestAllButton} ${
+                        testStatus === 'error' ? styles.modelTestDangerButton : styles.modelTestSecondaryButton
+                      }`}
+                    >
+                      {t('ai_providers.claude_test_action')}
+                    </Button>
+                  </div>
                 </div>
               </div>
 
               {testMessage && (
                 <div
-                  className={`status-badge ${
-                    testStatus === 'error'
-                      ? 'error'
-                      : testStatus === 'success'
-                        ? 'success'
-                        : 'muted'
-                  }`}
+                  className={styles.modelTestMessage}
                 >
-                  {testMessage}
+                  <div
+                    className={`status-badge ${
+                      testStatus === 'error'
+                        ? 'error'
+                        : testStatus === 'success'
+                          ? 'success'
+                          : 'muted'
+                    }`}
+                  >
+                    {testMessage}
+                  </div>
                 </div>
               )}
             </div>

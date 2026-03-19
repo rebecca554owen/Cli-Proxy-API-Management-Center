@@ -473,6 +473,7 @@ export function AiProvidersOpenAIEditPage() {
                     onClick={() => void testSingleKey(index)}
                     disabled={saving || disableControls || isTestingKeys || !canTestKey}
                     loading={keyStatus === 'loading'}
+                    className={`${styles.modelTestSecondaryButton} ${styles.providerActionButtonCompact}`}
                   >
                     {t('ai_providers.openai_test_single_action')}
                   </Button>
@@ -481,6 +482,7 @@ export function AiProvidersOpenAIEditPage() {
                     size="sm"
                     onClick={() => removeEntry(index)}
                     disabled={saving || disableControls || isTestingKeys || list.length <= 1}
+                    className={styles.providerActionButtonCompact}
                   >
                     {t('common.delete')}
                   </Button>
@@ -656,21 +658,28 @@ export function AiProvidersOpenAIEditPage() {
                     ariaLabel={t('ai_providers.openai_test_title')}
                     disabled={saving || disableControls || isTestingKeys || testStatus === 'loading' || availableModels.length === 0}
                   />
-                  <Button
-                    variant={testStatus === 'error' ? 'danger' : 'secondary'}
-                    size="sm"
-                    onClick={() => void testAllKeys()}
-                    loading={testStatus === 'loading'}
-                    disabled={saving || disableControls || isTestingKeys || testStatus === 'loading' || !hasConfiguredModels || !hasTestableKeys}
-                    title={t('ai_providers.openai_test_all_hint')}
-                    className={styles.modelTestAllButton}
-                  >
-                    {t('ai_providers.openai_test_all_action')}
-                  </Button>
+                  <div className={styles.modelTestPanelActions}>
+                    <Button
+                      variant={testStatus === 'error' ? 'danger' : 'secondary'}
+                      size="sm"
+                      onClick={() => void testAllKeys()}
+                      loading={testStatus === 'loading'}
+                      disabled={saving || disableControls || isTestingKeys || testStatus === 'loading' || !hasConfiguredModels || !hasTestableKeys}
+                      title={t('ai_providers.openai_test_all_hint')}
+                      className={`${styles.modelTestAllButton} ${
+                        testStatus === 'error' ? styles.modelTestDangerButton : styles.modelTestSecondaryButton
+                      }`}
+                    >
+                      {t('ai_providers.openai_test_all_action')}
+                    </Button>
+                  </div>
                 </div>
               </div>
               {testMessage && (
                 <div
+                  className={styles.modelTestMessage}
+                >
+                  <div
                   className={`status-badge ${
                     testStatus === 'error'
                       ? 'error'
@@ -678,8 +687,9 @@ export function AiProvidersOpenAIEditPage() {
                         ? 'success'
                         : 'muted'
                   }`}
-                >
-                  {testMessage}
+                  >
+                    {testMessage}
+                  </div>
                 </div>
               )}
             </div>

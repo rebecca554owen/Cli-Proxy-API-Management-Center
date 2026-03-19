@@ -986,12 +986,14 @@
 
 // 禁用按钮
 .disableBtn {
-  padding: 4px 10px;
+  min-height: 32px;
+  padding: 0 10px;
   border-radius: $radius-md;
   border: 1px solid rgba(239, 68, 68, 0.4);
   background: rgba(239, 68, 68, 0.1);
   color: var(--danger-color, #ef4444);
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
@@ -1007,13 +1009,19 @@
   }
 }
 
+.providerDisableButton {
+  @extend .disableBtn;
+}
+
 .enableBtn {
-  padding: 4px 10px;
+  min-height: 32px;
+  padding: 0 10px;
   border-radius: $radius-md;
   border: 1px solid rgba(34, 197, 94, 0.4);
   background: rgba(34, 197, 94, 0.12);
   color: #15803d;
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
@@ -1029,29 +1037,43 @@
   }
 }
 
+.providerEnableButton {
+  @extend .enableBtn;
+}
+
 .actionBtn {
-  padding: 4px 10px;
+  min-height: 32px;
+  padding: 0 10px;
   border-radius: $radius-md;
   border: 1px solid var(--border-color);
   background: var(--bg-secondary);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
 
-  &:hover {
+  &:hover:not(:disabled) {
     color: var(--text-primary);
     border-color: var(--primary-color);
   }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+.providerActionButton {
+  @extend .actionBtn;
 }
 
 .tableActions {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: nowrap;
-  white-space: nowrap;
+  flex-wrap: wrap;
 }
 
 .channelCell {

@@ -2,7 +2,6 @@ import { Fragment, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import iconVertex from '@/assets/icons/vertex.svg';
 import type { ProviderKeyConfig } from '@/types';
 import { maskApiKey } from '@/utils/format';
@@ -94,12 +93,19 @@ export function VertexSection({
           actionsDisabled={actionsDisabled}
           getRowDisabled={(item) => hasDisableAllModelsRule(item.excludedModels)}
           renderExtraActions={(item, index) => (
-            <ToggleSwitch
-              label={t('ai_providers.config_toggle_label')}
-              checked={!hasDisableAllModelsRule(item.excludedModels)}
+            <Button
+              variant="secondary"
+              size="sm"
+              className={`${styles.providerActionButton} ${
+                hasDisableAllModelsRule(item.excludedModels)
+                  ? styles.providerEnableButton
+                  : styles.providerDisableButton
+              }`}
               disabled={toggleDisabled}
-              onChange={(value) => void onToggle(index, value)}
-            />
+              onClick={() => void onToggle(index, hasDisableAllModelsRule(item.excludedModels))}
+            >
+              {hasDisableAllModelsRule(item.excludedModels) ? '启用' : '禁用'}
+            </Button>
           )}
           renderContent={(item, index) => {
             const stats = getStatsBySource(item.apiKey, keyStats, item.prefix);
