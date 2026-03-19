@@ -42,6 +42,25 @@ const toKeyEntryDraft = (
   testMessage: '',
 });
 
+const mergeHeaderObjects = (
+  ...inputs: Array<Record<string, string | undefined> | undefined>
+): Record<string, string> => {
+  const merged: Record<string, string> = {};
+
+  inputs.forEach((input) => {
+    const headers = buildHeaderObject(input);
+    Object.entries(headers).forEach(([key, value]) => {
+      const existingKey = Object.keys(merged).find((currentKey) => currentKey.toLowerCase() === key.toLowerCase());
+      if (existingKey) {
+        delete merged[existingKey];
+      }
+      merged[key] = value;
+    });
+  });
+
+  return merged;
+};
+
 const cloneCloak = (cloak: CloakConfig | undefined) =>
   cloak
     ? {
@@ -110,7 +129,7 @@ export const buildProviderGroupFormState = (
   modelEntries: modelsToEntries(group.models),
   excludedText: excludedModelsToText(group.excludedModels),
   testModel: group.models[0]?.name ?? '',
-  keyEntries: group.configs.map((item) => toKeyEntryDraft(item.apiKey, item.proxyUrl, undefined)),
+  keyEntries: group.configs.map((item) => toKeyEntryDraft(item.apiKey, item.proxyUrl, item.headers)),
   websockets: group.websockets,
   cloak: cloneCloak(group.cloak),
 });
@@ -165,18 +184,22 @@ export const buildProviderConfigsFromGroupForm = (
     .filter(Boolean) as ProviderKeyConfig['models'];
   const excludedModels = parseExcludedModels(form.excludedText);
 
-  return keyEntries.map((entry) => ({
-    apiKey: entry.apiKey,
-    priority: form.priority !== undefined ? Math.trunc(form.priority) : undefined,
-    prefix: form.prefix.trim() || undefined,
-    baseUrl: form.baseUrl.trim() || undefined,
-    proxyUrl: entry.proxyUrl,
-    headers: Object.keys(headersObject).length ? headersObject : undefined,
-    models,
-    excludedModels,
-    websockets: form.websockets,
-    cloak: cloneCloak(form.cloak),
-  }));
+  return keyEntries.map((entry) => {
+    const mergedHeaders = mergeHeaderObjects(headersObject, entry.headers);
+
+    return {
+      apiKey: entry.apiKey,
+      priority: form.priority !== undefined ? Math.trunc(form.priority) : undefined,
+      prefix: form.prefix.trim() || undefined,
+      baseUrl: form.baseUrl.trim() || undefined,
+      proxyUrl: entry.proxyUrl,
+      headers: Object.keys(mergedHeaders).length ? mergedHeaders : undefined,
+      models,
+      excludedModels,
+      websockets: form.websockets,
+      cloak: cloneCloak(form.cloak),
+    };
+  });
 };
 
 export const buildGeminiConfigsFromGroupForm = (

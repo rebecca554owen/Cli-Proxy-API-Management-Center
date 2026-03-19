@@ -25,7 +25,6 @@ import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
 import type { ProviderKeyConfig } from '@/types';
 import { buildHeaderObject } from '@/utils/headers';
 import type { ModelInfo } from '@/utils/models';
-import { copyToClipboard } from '@/utils/clipboard';
 import type { ProviderGroupFormState } from '@/components/providers';
 import layoutStyles from './AiProvidersEditLayout.module.scss';
 import styles from './AiProvidersPage.module.scss';
@@ -87,6 +86,7 @@ export function AiProvidersCodexEditPage() {
   const [summaryStatus, setSummaryStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [summaryMessage, setSummaryMessage] = useState('');
   const [isTesting, setIsTesting] = useState(false);
+  const [streamEnabled, setStreamEnabled] = useState(true);
 
   const [modelDiscoveryOpen, setModelDiscoveryOpen] = useState(false);
   const [modelDiscoveryEndpoint, setModelDiscoveryEndpoint] = useState('');
@@ -351,25 +351,25 @@ export function AiProvidersCodexEditPage() {
   }, []);
 
   const runSingleKeyTest = useCallback(
-    async (keyIndex: number) => {
+    async (keyIndex: number): Promise<boolean> => {
       const modelName = form.testModel.trim() || form.modelEntries.find((entry) => entry.name.trim())?.name || '';
       if (!form.baseUrl.trim()) {
         const message = t('notification.codex_base_url_required');
         setSummaryStatus('error');
         setSummaryMessage(message);
         showNotification(message, 'error');
-        return;
+        return false;
       }
       if (!modelName) {
         const message = t('notification.codex_test_model_required');
         setSummaryStatus('error');
         setSummaryMessage(message);
         showNotification(message, 'error');
-        return;
+        return false;
       }
       const target = form.keyEntries[keyIndex];
       if (!target?.apiKey.trim()) {
-        return;
+        return false;
       }
       setForm((prev) => ({
         ...prev,
@@ -383,8 +383,10 @@ export function AiProvidersCodexEditPage() {
           baseUrl: form.baseUrl,
           testModel: modelName,
           headers: form.headers,
+          keyHeaders: target.headers,
           apiKey: target.apiKey,
           proxyUrl: target.proxyUrl,
+          stream: streamEnabled,
         });
         setForm((prev) => ({
           ...prev,
@@ -392,6 +394,7 @@ export function AiProvidersCodexEditPage() {
             index === keyIndex ? { ...entry, testStatus: 'success', testMessage: '' } : entry
           ),
         }));
+        return true;
       } catch (err: unknown) {
         const message = resolveConnectivityErrorMessage('codex', err, t);
         setForm((prev) => ({
@@ -400,9 +403,10 @@ export function AiProvidersCodexEditPage() {
             index === keyIndex ? { ...entry, testStatus: 'error', testMessage: message } : entry
           ),
         }));
+        return false;
       }
     },
-    [form.baseUrl, form.headers, form.keyEntries, form.modelEntries, form.testModel, showNotification, t]
+    [form.baseUrl, form.headers, form.keyEntries, form.modelEntries, form.testModel, showNotification, streamEnabled, t]
   );
 
   const testOne = useCallback(
@@ -442,9 +446,8 @@ export function AiProvidersCodexEditPage() {
       })),
     }));
     try {
-      await Promise.all(validIndexes.map((index) => runSingleKeyTest(index)));
-      const nextEntries = form.keyEntries;
-      const successCount = nextEntries.filter((entry) => entry.testStatus === 'success').length;
+      const results = await Promise.all(validIndexes.map((index) => runSingleKeyTest(index)));
+      const successCount = results.filter(Boolean).length;
       const failCount = validIndexes.length - successCount;
       if (failCount === 0) {
         const message = t('ai_providers.codex_test_all_success', { count: successCount });
@@ -540,15 +543,6 @@ export function AiProvidersCodexEditPage() {
     updateConfigValue,
   ]);
 
-  const copyConfig = useCallback(async () => {
-    const text = JSON.stringify(buildProviderConfigsFromGroupForm(form), null, 2);
-    const copied = await copyToClipboard(text);
-    showNotification(
-      t(copied ? 'notification.link_copied' : 'notification.copy_failed'),
-      copied ? 'success' : 'error'
-    );
-  }, [form, showNotification, t]);
-
   const canSave = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex && !isTesting;
 
   return (
@@ -608,7 +602,11 @@ export function AiProvidersCodexEditPage() {
               onTestAll={testAll}
               onTestOne={testOne}
               onOpenModelDiscovery={() => setModelDiscoveryOpen(true)}
-              onCopyConfig={copyConfig}
+              streamEnabled={streamEnabled}
+              onToggleStreamEnabled={(value) => {
+                setStreamEnabled(value);
+                resetConnectivityState();
+              }}
               renderExtraFields={
                 <div className="form-group">
                   <label>{t('ai_providers.codex_websockets_label')}</label>

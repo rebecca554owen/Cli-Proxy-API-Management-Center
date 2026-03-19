@@ -23,7 +23,6 @@ import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
 import type { GeminiKeyConfig } from '@/types';
 import { buildHeaderObject } from '@/utils/headers';
 import type { ModelInfo } from '@/utils/models';
-import { copyToClipboard } from '@/utils/clipboard';
 import type { ProviderGroupFormState } from '@/components/providers';
 import layoutStyles from './AiProvidersEditLayout.module.scss';
 import styles from './AiProvidersPage.module.scss';
@@ -97,6 +96,7 @@ export function AiProvidersGeminiEditPage() {
   const [summaryStatus, setSummaryStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [summaryMessage, setSummaryMessage] = useState('');
   const [isTesting, setIsTesting] = useState(false);
+  const [streamEnabled, setStreamEnabled] = useState(true);
 
   const [modelDiscoveryOpen, setModelDiscoveryOpen] = useState(false);
   const [modelDiscoveryEndpoint, setModelDiscoveryEndpoint] = useState('');
@@ -427,8 +427,10 @@ export function AiProvidersGeminiEditPage() {
           baseUrl: form.baseUrl,
           testModel: modelName,
           headers: form.headers,
+          keyHeaders: target.headers,
           apiKey: target.apiKey,
           proxyUrl: target.proxyUrl,
+          stream: streamEnabled,
         });
 
         setForm((prev) => ({
@@ -449,7 +451,7 @@ export function AiProvidersGeminiEditPage() {
         return false;
       }
     },
-    [form.baseUrl, form.headers, form.keyEntries, form.modelEntries, form.testModel, showNotification, t]
+    [form.baseUrl, form.headers, form.keyEntries, form.modelEntries, form.testModel, showNotification, streamEnabled, t]
   );
 
   const testOne = useCallback(
@@ -585,15 +587,6 @@ export function AiProvidersGeminiEditPage() {
     updateConfigValue,
   ]);
 
-  const copyConfig = useCallback(async () => {
-    const text = JSON.stringify(buildGeminiConfigsFromGroupForm(normalizeGeminiGroupForm(form)), null, 2);
-    const copied = await copyToClipboard(text);
-    showNotification(
-      t(copied ? 'notification.link_copied' : 'notification.copy_failed'),
-      copied ? 'success' : 'error'
-    );
-  }, [form, showNotification, t]);
-
   const canSave = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex && !isTesting;
 
   return (
@@ -653,7 +646,11 @@ export function AiProvidersGeminiEditPage() {
               onTestAll={testAll}
               onTestOne={testOne}
               onOpenModelDiscovery={() => setModelDiscoveryOpen(true)}
-              onCopyConfig={copyConfig}
+              streamEnabled={streamEnabled}
+              onToggleStreamEnabled={(value) => {
+                setStreamEnabled(value);
+                resetConnectivityState();
+              }}
             />
 
             <Modal

@@ -34,6 +34,7 @@
     "base_url": "地址",
     "prefix": "前缀",
     "proxy_url": "代理",
+    "stream": "流式测试",
     "priority": "优先级",
     "alias": "别名",
     "failure": "失败",

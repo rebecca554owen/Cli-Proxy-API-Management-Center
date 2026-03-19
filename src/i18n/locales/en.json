@@ -34,6 +34,7 @@
     "base_url": "Address",
     "prefix": "Prefix",
     "proxy_url": "Proxy",
+    "stream": "Streaming Test",
     "priority": "Priority",
     "alias": "Alias",
     "failure": "Failure",

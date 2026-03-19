@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { copyToClipboard } from '@/utils/clipboard';
 import { useNotificationStore } from '@/stores';
+import { hasProviderConnectivityAuth } from './providerConnectivity';
 import type { ProviderKeyEntryDraft, ProviderKind } from './types';
 import styles from '@/pages/AiProvidersPage.module.scss';
 
@@ -12,8 +13,8 @@ type ProviderKeyEntriesEditorProps = {
   disabled?: boolean;
   testing?: boolean;
   hasConfiguredModels?: boolean;
+  globalHeaders?: Array<{ key: string; value: string }>;
   onChange: (entries: ProviderKeyEntryDraft[]) => void;
-  onCopyConfig?: () => void;
   onTestOne?: (index: number) => Promise<void> | void;
   onAdd?: () => void;
 };
@@ -92,8 +93,8 @@ export function ProviderKeyEntriesEditor({
   disabled = false,
   testing = false,
   hasConfiguredModels = true,
+  globalHeaders = [],
   onChange,
-  onCopyConfig,
   onTestOne,
   onAdd,
 }: ProviderKeyEntriesEditorProps) {
@@ -144,17 +145,6 @@ export function ProviderKeyEntriesEditor({
           {t('ai_providers.openai_keys_count', { defaultValue: '密钥数量' })}: {list.length}
         </span>
         <div className={styles.modelTestPanelActions}>
-          {onCopyConfig ? (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={onCopyConfig}
-              disabled={disabled || testing}
-              className={styles.providerActionButtonCompact}
-            >
-              {t('ai_providers.copy_full_config', { defaultValue: '复制配置' })}
-            </Button>
-          ) : null}
           <Button
             variant="secondary"
             size="sm"
@@ -175,7 +165,13 @@ export function ProviderKeyEntriesEditor({
           <div className={styles.keyTableColAction}>{t('common.action')}</div>
         </div>
         {list.map((entry, index) => {
-          const canTestKey = Boolean(entry.apiKey.trim()) && hasConfiguredModels;
+          const canTestKey =
+            hasConfiguredModels &&
+            hasProviderConnectivityAuth(provider, {
+              headers: globalHeaders,
+              keyHeaders: entry.headers,
+              apiKey: entry.apiKey,
+            });
           return (
             <div key={index} className={styles.keyTableRow}>
               <div className={styles.keyTableColIndex}>{index + 1}</div>

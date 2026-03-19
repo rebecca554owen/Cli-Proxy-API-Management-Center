@@ -10,36 +10,16 @@ import { ModelInputList } from '@/components/ui/ModelInputList';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack';
 import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell';
-import { apiCallApi, getApiCallErrorMessage } from '@/services/api';
 import { useNotificationStore } from '@/stores';
-import { buildHeaderObject } from '@/utils/headers';
-import { buildClaudeMessagesEndpoint, parseTextList } from '@/components/providers/utils';
+import {
+  hasProviderConnectivityAuth,
+  resolveConnectivityErrorMessage,
+  runProviderConnectivityTest,
+} from '@/components/providers';
+import { parseTextList } from '@/components/providers/utils';
 import type { ClaudeEditOutletContext } from './AiProvidersClaudeEditLayout';
 import styles from './AiProvidersPage.module.scss';
 import layoutStyles from './AiProvidersEditLayout.module.scss';
-
-const CLAUDE_TEST_TIMEOUT_MS = 30_000;
-const DEFAULT_ANTHROPIC_VERSION = '2023-06-01';
-
-const getErrorMessage = (err: unknown) => {
-  if (err instanceof Error) return err.message;
-  if (typeof err === 'string') return err;
-  return '';
-};
-
-const hasHeader = (headers: Record<string, string>, name: string) => {
-  const target = name.toLowerCase();
-  return Object.keys(headers).some((key) => key.toLowerCase() === target);
-};
-
-const resolveBearerTokenFromAuthorization = (headers: Record<string, string>): string => {
-  const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === 'authorization');
-  if (!entry) return '';
-  const value = String(entry[1] ?? '').trim();
-  if (!value) return '';
-  const match = value.match(/^Bearer\s+(.+)$/i);
-  return match?.[1]?.trim() || '';
-};
 
 export function AiProvidersClaudeEditPage() {
   const { t } = useTranslation();
@@ -71,6 +51,7 @@ export function AiProvidersClaudeEditPage() {
 
   const swipeRef = useEdgeSwipeBack({ onBack: handleBack });
   const [isTesting, setIsTesting] = useState(false);
+  const [streamEnabled, setStreamEnabled] = useState(true);
   const lastCloakConfigRef = useRef<typeof form.cloak>(null);
 
   useEffect(() => {
@@ -161,8 +142,9 @@ export function AiProvidersClaudeEditPage() {
       testModel.trim(),
       headersSignature,
       modelsSignature,
+      streamEnabled ? 'stream' : 'non-stream',
     ].join('||');
-  }, [form.baseUrl, form.headers, form.modelEntries, keyList, testModel]);
+  }, [form.baseUrl, form.headers, form.modelEntries, keyList, streamEnabled, testModel]);
 
   const previousConnectivityConfigRef = useRef(connectivityConfigSignature);
 
@@ -191,13 +173,12 @@ export function AiProvidersClaudeEditPage() {
       return;
     }
 
-    const customHeaders = buildHeaderObject(form.headers);
-    const apiKey = resolvedTestApiKey;
-    const hasApiKeyHeader = hasHeader(customHeaders, 'x-api-key');
-    const apiKeyFromAuthorization = resolveBearerTokenFromAuthorization(customHeaders);
-    const resolvedApiKey = apiKey || apiKeyFromAuthorization;
-
-    if (!resolvedApiKey && !hasApiKeyHeader) {
+    if (
+      !hasProviderConnectivityAuth('claude', {
+        headers: form.headers,
+        apiKey: resolvedTestApiKey,
+      })
+    ) {
       const message = t('ai_providers.claude_test_key_required');
       setTestStatus('error');
       setTestMessage(message);
@@ -205,71 +186,26 @@ export function AiProvidersClaudeEditPage() {
       return;
     }
 
-    const endpoint = buildClaudeMessagesEndpoint(form.baseUrl ?? '');
-    if (!endpoint) {
-      const message = t('ai_providers.claude_test_endpoint_invalid');
-      setTestStatus('error');
-      setTestMessage(message);
-      showNotification(message, 'error');
-      return;
-    }
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...customHeaders,
-    };
-
-    if (!hasHeader(headers, 'anthropic-version')) {
-      headers['anthropic-version'] = DEFAULT_ANTHROPIC_VERSION;
-    }
-    if (!Object.prototype.hasOwnProperty.call(headers, 'Anthropic-Version')) {
-      headers['Anthropic-Version'] = headers['anthropic-version'] ?? DEFAULT_ANTHROPIC_VERSION;
-    }
-
-    if (!hasApiKeyHeader && resolvedApiKey) {
-      headers['x-api-key'] = resolvedApiKey;
-    }
-    if (!Object.prototype.hasOwnProperty.call(headers, 'X-Api-Key') && resolvedApiKey) {
-      headers['X-Api-Key'] = resolvedApiKey;
-    }
-
     setIsTesting(true);
     setTestStatus('loading');
     setTestMessage(t('ai_providers.claude_test_running'));
 
     try {
-      const result = await apiCallApi.request(
-        {
-          method: 'POST',
-          url: endpoint,
-          header: headers,
-          data: JSON.stringify({
-            model: modelName,
-            max_tokens: 8,
-            messages: [{ role: 'user', content: 'Hi' }],
-          }),
-        },
-        { timeout: CLAUDE_TEST_TIMEOUT_MS }
-      );
-
-      if (result.statusCode < 200 || result.statusCode >= 300) {
-        throw new Error(getApiCallErrorMessage(result));
-      }
+      await runProviderConnectivityTest({
+        provider: 'claude',
+        baseUrl: form.baseUrl ?? '',
+        testModel: modelName,
+        headers: form.headers,
+        apiKey: resolvedTestApiKey,
+        stream: streamEnabled,
+      });
 
       const message = t('ai_providers.claude_test_success');
       setTestStatus('success');
       setTestMessage(message);
       showNotification(message, 'success');
     } catch (err: unknown) {
-      const message = getErrorMessage(err);
-      const errorCode =
-        typeof err === 'object' && err !== null && 'code' in err
-          ? String((err as { code?: string }).code)
-          : '';
-      const isTimeout = errorCode === 'ECONNABORTED' || message.toLowerCase().includes('timeout');
-      const resolvedMessage = isTimeout
-        ? t('ai_providers.claude_test_timeout', { seconds: CLAUDE_TEST_TIMEOUT_MS / 1000 })
-        : `${t('ai_providers.claude_test_failed')}: ${message || t('common.unknown_error')}`;
+      const resolvedMessage = resolveConnectivityErrorMessage('claude', err, t);
       setTestStatus('error');
       setTestMessage(resolvedMessage);
       showNotification(resolvedMessage, 'error');
@@ -285,6 +221,7 @@ export function AiProvidersClaudeEditPage() {
     setTestMessage,
     setTestStatus,
     showNotification,
+    streamEnabled,
     t,
     testModel,
   ]);
@@ -542,6 +479,19 @@ export function AiProvidersClaudeEditPage() {
                 <div className={styles.modelTestMeta}>
                   <label className={styles.modelTestLabel}>{t('ai_providers.claude_test_title')}</label>
                   <span className={styles.modelTestHint}>{t('ai_providers.claude_test_hint')}</span>
+                  <div className={styles.modelTestHint}>
+                    <label>{t('common.stream')}</label>
+                    <ToggleSwitch
+                      checked={streamEnabled}
+                      onChange={(value) => {
+                        setStreamEnabled(value);
+                        setTestStatus('idle');
+                        setTestMessage('');
+                      }}
+                      disabled={saving || disableControls || isTesting}
+                      ariaLabel={t('common.stream')}
+                    />
+                  </div>
                 </div>
                 <div className={styles.modelTestControls}>
                   <Select

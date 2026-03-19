@@ -7,26 +7,22 @@ import { HeaderInputList } from '@/components/ui/HeaderInputList';
 import { Input } from '@/components/ui/Input';
 import { ModelInputList } from '@/components/ui/ModelInputList';
 import { Select } from '@/components/ui/Select';
+import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell';
 import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack';
 import { useNotificationStore } from '@/stores';
-import { apiCallApi, getApiCallErrorMessage } from '@/services/api';
 import type { ApiKeyEntry } from '@/types';
-import { buildHeaderObject } from '@/utils/headers';
 import { copyToClipboard } from '@/utils/clipboard';
-import { buildApiKeyEntry, buildOpenAIChatCompletionsEndpoint } from '@/components/providers/utils';
+import {
+  buildApiKeyEntry,
+  hasProviderConnectivityAuth,
+  resolveConnectivityErrorMessage,
+  runProviderConnectivityTest,
+} from '@/components/providers';
 import type { OpenAIEditOutletContext } from './AiProvidersOpenAIEditLayout';
 import type { KeyTestStatus } from '@/stores/useOpenAIEditDraftStore';
 import styles from './AiProvidersPage.module.scss';
 import layoutStyles from './AiProvidersEditLayout.module.scss';
-
-const OPENAI_TEST_TIMEOUT_MS = 30_000;
-
-const getErrorMessage = (err: unknown) => {
-  if (err instanceof Error) return err.message;
-  if (typeof err === 'string') return err;
-  return '';
-};
 
 // Status icon components
 function StatusLoadingIcon() {
@@ -127,6 +123,7 @@ export function AiProvidersOpenAIEditPage() {
 
   const swipeRef = useEdgeSwipeBack({ onBack: handleBack });
   const [isTestingKeys, setIsTestingKeys] = useState(false);
+  const [streamEnabled, setStreamEnabled] = useState(true);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -140,7 +137,13 @@ export function AiProvidersOpenAIEditPage() {
 
   const canSave = !disableControls && !loading && !saving && !invalidIndexParam && !invalidIndex && !isTestingKeys;
   const hasConfiguredModels = form.modelEntries.some((entry) => entry.name.trim());
-  const hasTestableKeys = form.apiKeyEntries.some((entry) => entry.apiKey?.trim());
+  const hasTestableKeys = form.apiKeyEntries.some((entry) =>
+    hasProviderConnectivityAuth('openai', {
+      headers: form.headers,
+      keyHeaders: entry.headers,
+      apiKey: entry.apiKey,
+    })
+  );
   const modelSelectOptions = useMemo(() => {
     const seen = new Set<string>();
     return form.modelEntries.reduce<Array<{ value: string; label: string }>>((acc, entry) => {
@@ -162,8 +165,14 @@ export function AiProvidersOpenAIEditPage() {
     const modelsSignature = form.modelEntries
       .map((entry) => `${entry.name.trim()}:${entry.alias.trim()}`)
       .join('|');
-    return [form.baseUrl.trim(), testModel.trim(), headersSignature, modelsSignature].join('||');
-  }, [form.baseUrl, form.headers, form.modelEntries, testModel]);
+    return [
+      form.baseUrl.trim(),
+      testModel.trim(),
+      headersSignature,
+      modelsSignature,
+      streamEnabled ? 'stream' : 'non-stream',
+    ].join('||');
+  }, [form.baseUrl, form.headers, form.modelEntries, streamEnabled, testModel]);
   const previousConnectivityConfigRef = useRef(connectivityConfigSignature);
 
   useEffect(() => {
@@ -191,14 +200,14 @@ export function AiProvidersOpenAIEditPage() {
         return false;
       }
 
-      const endpoint = buildOpenAIChatCompletionsEndpoint(baseUrl);
-      if (!endpoint) {
-        showNotification(t('notification.openai_test_url_required'), 'error');
-        return false;
-      }
-
       const keyEntry = form.apiKeyEntries[keyIndex];
-      if (!keyEntry?.apiKey?.trim()) {
+      if (
+        !hasProviderConnectivityAuth('openai', {
+          headers: form.headers,
+          keyHeaders: keyEntry?.headers,
+          apiKey: keyEntry?.apiKey,
+        })
+      ) {
         setDraftKeyTestStatus(keyIndex, { status: 'error', message: t('notification.openai_test_key_required') });
         return false;
       }
@@ -209,55 +218,39 @@ export function AiProvidersOpenAIEditPage() {
         return false;
       }
 
-      const customHeaders = buildHeaderObject(form.headers);
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        ...customHeaders,
-      };
-      if (!headers.Authorization && !headers['authorization']) {
-        headers.Authorization = `Bearer ${keyEntry.apiKey.trim()}`;
-      }
-
-      // Set loading state for this key
       setDraftKeyTestStatus(keyIndex, { status: 'loading', message: '' });
 
       try {
-        const result = await apiCallApi.request(
-          {
-            method: 'POST',
-            url: endpoint,
-            header: Object.keys(headers).length ? headers : undefined,
-            data: JSON.stringify({
-              model: modelName,
-              messages: [{ role: 'user', content: 'Hi' }],
-              stream: false,
-              max_tokens: 5,
-            }),
-          },
-          { timeout: OPENAI_TEST_TIMEOUT_MS }
-        );
-
-        if (result.statusCode < 200 || result.statusCode >= 300) {
-          throw new Error(getApiCallErrorMessage(result));
-        }
+        await runProviderConnectivityTest({
+          provider: 'openai',
+          baseUrl,
+          testModel: modelName,
+          headers: form.headers,
+          keyHeaders: keyEntry?.headers,
+          apiKey: keyEntry?.apiKey ?? '',
+          proxyUrl: keyEntry?.proxyUrl,
+          stream: streamEnabled,
+        });
 
         setDraftKeyTestStatus(keyIndex, { status: 'success', message: '' });
         return true;
       } catch (err: unknown) {
-        const message = getErrorMessage(err);
-        const errorCode =
-          typeof err === 'object' && err !== null && 'code' in err
-            ? String((err as { code?: string }).code)
-            : '';
-        const isTimeout = errorCode === 'ECONNABORTED' || message.toLowerCase().includes('timeout');
-        const errorMessage = isTimeout
-          ? t('ai_providers.openai_test_timeout', { seconds: OPENAI_TEST_TIMEOUT_MS / 1000 })
-          : message;
+        const errorMessage = resolveConnectivityErrorMessage('openai', err, t);
         setDraftKeyTestStatus(keyIndex, { status: 'error', message: errorMessage });
         return false;
       }
     },
-    [form.baseUrl, form.apiKeyEntries, form.headers, testModel, availableModels, t, setDraftKeyTestStatus, showNotification]
+    [
+      form.apiKeyEntries,
+      form.baseUrl,
+      form.headers,
+      testModel,
+      availableModels,
+      streamEnabled,
+      t,
+      setDraftKeyTestStatus,
+      showNotification,
+    ]
   );
 
   const testSingleKey = useCallback(
@@ -286,15 +279,6 @@ export function AiProvidersOpenAIEditPage() {
       return;
     }
 
-    const endpoint = buildOpenAIChatCompletionsEndpoint(baseUrl);
-    if (!endpoint) {
-      const message = t('notification.openai_test_url_required');
-      setTestStatus('error');
-      setTestMessage(message);
-      showNotification(message, 'error');
-      return;
-    }
-
     const modelName = testModel.trim() || availableModels[0] || '';
     if (!modelName) {
       const message = t('notification.openai_test_model_required');
@@ -305,7 +289,15 @@ export function AiProvidersOpenAIEditPage() {
     }
 
     const validKeyIndexes = form.apiKeyEntries
-      .map((entry, index) => (entry.apiKey?.trim() ? index : -1))
+      .map((entry, index) =>
+        hasProviderConnectivityAuth('openai', {
+          headers: form.headers,
+          keyHeaders: entry.headers,
+          apiKey: entry.apiKey,
+        })
+          ? index
+          : -1
+      )
       .filter((index) => index >= 0);
     if (validKeyIndexes.length === 0) {
       const message = t('notification.openai_test_key_required');
@@ -435,7 +427,13 @@ export function AiProvidersOpenAIEditPage() {
           {/* 数据行 */}
           {list.map((entry, index) => {
             const keyStatus = keyTestStatuses[index]?.status ?? 'idle';
-            const canTestKey = Boolean(entry.apiKey?.trim()) && hasConfiguredModels;
+            const canTestKey =
+              hasConfiguredModels &&
+              hasProviderConnectivityAuth('openai', {
+                headers: form.headers,
+                keyHeaders: entry.headers,
+                apiKey: entry.apiKey,
+              });
 
             return (
               <div key={index} className={styles.keyTableRow}>
@@ -657,6 +655,20 @@ export function AiProvidersOpenAIEditPage() {
                 <div className={styles.modelTestMeta}>
                   <label className={styles.modelTestLabel}>{t('ai_providers.openai_test_title')}</label>
                   <span className={styles.modelTestHint}>{t('ai_providers.openai_test_hint')}</span>
+                  <div className={styles.modelTestHint}>
+                    <label>{t('common.stream')}</label>
+                    <ToggleSwitch
+                      checked={streamEnabled}
+                      onChange={(value) => {
+                        setStreamEnabled(value);
+                        resetDraftKeyTestStatuses(form.apiKeyEntries.length);
+                        setTestStatus('idle');
+                        setTestMessage('');
+                      }}
+                      disabled={saving || disableControls || isTestingKeys || testStatus === 'loading'}
+                      ariaLabel={t('common.stream')}
+                    />
+                  </div>
                 </div>
                 <div className={styles.modelTestControls}>
                   <Select

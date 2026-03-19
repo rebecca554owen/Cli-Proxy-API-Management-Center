@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
+import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import styles from '@/pages/AiProvidersPage.module.scss';
 import type { ProviderKeyEntryDraft, ProviderKind } from './types';
 
@@ -16,6 +17,8 @@ type ProviderConnectivityPanelProps = {
   summaryMessage: string;
   titleKey: string;
   hintKey: string;
+  streamEnabled?: boolean;
+  onToggleStreamEnabled?: (value: boolean) => void;
   onChangeTestModel: (value: string) => void;
   onTestAll: () => Promise<void> | void;
 };
@@ -31,6 +34,8 @@ export function ProviderConnectivityPanel({
   summaryMessage,
   titleKey,
   hintKey,
+  streamEnabled = true,
+  onToggleStreamEnabled,
   onChangeTestModel,
   onTestAll,
 }: ProviderConnectivityPanelProps) {
@@ -55,6 +60,15 @@ export function ProviderConnectivityPanel({
         <div className={styles.modelTestMeta}>
           <label className={styles.modelTestLabel}>{t(titleKey)}</label>
           <span className={styles.modelTestHint}>{t(hintKey)}</span>
+          <div className={styles.modelTestHint}>
+            <label>{t('common.stream')}</label>
+            <ToggleSwitch
+              checked={streamEnabled}
+              onChange={(value) => onToggleStreamEnabled?.(value)}
+              disabled={disabled || testing}
+              ariaLabel={t('common.stream')}
+            />
+          </div>
         </div>
         <div className={styles.modelTestControls}>
           <Select

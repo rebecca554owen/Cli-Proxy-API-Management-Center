@@ -12,6 +12,7 @@ export interface ApiCallRequest {
   header?: Record<string, string>;
   data?: string;
   proxy?: string;
+  stream?: boolean;
 }
 
 export interface ApiCallResult<T = unknown> {
@@ -19,6 +20,19 @@ export interface ApiCallResult<T = unknown> {
   header: Record<string, string[]>;
   bodyText: string;
   body: T | null;
+}
+
+export interface ApiCallStreamEvent {
+  type: 'response' | 'chunk' | 'done' | 'error';
+  statusCode?: number;
+  header?: Record<string, string[]>;
+  chunk?: string;
+  error?: string;
+}
+
+export interface ApiCallStreamConfig {
+  signal?: AbortSignal;
+  timeout?: number;
 }
 
 const normalizeBody = (input: unknown): { bodyText: string; body: unknown | null } => {
@@ -45,6 +59,14 @@ const normalizeBody = (input: unknown): { bodyText: string; body: unknown | null
     return { bodyText: String(input), body: input };
   }
 };
+
+const normalizeStreamEvent = (input: Record<string, unknown>): ApiCallStreamEvent => ({
+  type: String(input.type ?? '') as ApiCallStreamEvent['type'],
+  statusCode: Number(input.statusCode ?? input.status_code ?? 0) || undefined,
+  header: (input.header ?? input.headers ?? undefined) as Record<string, string[]> | undefined,
+  chunk: typeof input.chunk === 'string' ? input.chunk : undefined,
+  error: typeof input.error === 'string' ? input.error : undefined,
+});
 
 export const getApiCallErrorMessage = (result: ApiCallResult): string => {
   const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -78,6 +100,36 @@ export const getApiCallErrorMessage = (result: ApiCallResult): string => {
   return message || 'Request failed';
 };
 
+const buildAbortSignal = (config?: ApiCallStreamConfig) => {
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const handleExternalAbort = () => controller.abort();
+  if (config?.signal) {
+    if (config.signal.aborted) {
+      controller.abort();
+    } else {
+      config.signal.addEventListener('abort', handleExternalAbort, { once: true });
+    }
+  }
+
+  if (config?.timeout && Number.isFinite(config.timeout) && config.timeout > 0) {
+    timeoutId = setTimeout(() => controller.abort(), config.timeout);
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+      if (config?.signal) {
+        config.signal.removeEventListener('abort', handleExternalAbort);
+      }
+    },
+  };
+};
+
 export const apiCallApi = {
   request: async (
     payload: ApiCallRequest,
@@ -94,5 +146,60 @@ export const apiCallApi = {
       bodyText,
       body
     };
+  },
+
+  requestStream: async (
+    payload: ApiCallRequest,
+    onEvent: (event: ApiCallStreamEvent) => void,
+    config?: ApiCallStreamConfig
+  ): Promise<void> => {
+    const { baseUrl, managementKey } = apiClient.getFetchContext();
+    const { signal, cleanup } = buildAbortSignal(config);
+
+    try {
+      const response = await fetch(`${baseUrl}/api-call`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${managementKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ...payload, stream: payload.stream ?? true }),
+        signal,
+      });
+
+      if (!response.ok) {
+        const message = (await response.text().catch(() => '')).trim();
+        throw new Error(message || `HTTP ${response.status}`);
+      }
+
+      if (!response.body) {
+        throw new Error('Stream response body is unavailable');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          onEvent(normalizeStreamEvent(JSON.parse(trimmed) as Record<string, unknown>));
+        }
+      }
+
+      buffer += decoder.decode();
+      if (buffer.trim()) {
+        onEvent(normalizeStreamEvent(JSON.parse(buffer.trim()) as Record<string, unknown>));
+      }
+    } finally {
+      cleanup();
+    }
   }
 };

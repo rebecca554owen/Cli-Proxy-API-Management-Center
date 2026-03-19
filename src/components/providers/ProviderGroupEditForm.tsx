@@ -20,7 +20,8 @@ type ProviderGroupEditFormProps = {
   onTestAll: () => Promise<void> | void;
   onTestOne: (index: number) => Promise<void> | void;
   onOpenModelDiscovery?: () => void;
-  onCopyConfig?: () => void;
+  streamEnabled?: boolean;
+  onToggleStreamEnabled?: (value: boolean) => void;
   renderExtraFields?: ReactNode;
   renderAfterModels?: ReactNode;
   showNameField?: boolean;
@@ -37,7 +38,8 @@ export function ProviderGroupEditForm({
   onTestAll,
   onTestOne,
   onOpenModelDiscovery,
-  onCopyConfig,
+  streamEnabled = true,
+  onToggleStreamEnabled,
   renderExtraFields,
   renderAfterModels,
   showNameField = false,
@@ -160,6 +162,8 @@ export function ProviderGroupEditForm({
           summaryMessage={summaryMessage}
           titleKey={`ai_providers.${providerKey}_test_title`}
           hintKey={`ai_providers.${providerKey}_test_hint`}
+          streamEnabled={streamEnabled}
+          onToggleStreamEnabled={onToggleStreamEnabled}
           onChangeTestModel={(value) => setForm((prev) => ({ ...prev, testModel: value }))}
           onTestAll={onTestAll}
         />
@@ -184,8 +188,8 @@ export function ProviderGroupEditForm({
           disabled={disabled}
           testing={testing}
           hasConfiguredModels={form.modelEntries.some((entry) => entry.name.trim())}
+          globalHeaders={form.headers}
           onChange={(entries) => setForm((prev) => ({ ...prev, keyEntries: entries }))}
-          onCopyConfig={onCopyConfig}
           onTestOne={onTestOne}
         />
       </div>
