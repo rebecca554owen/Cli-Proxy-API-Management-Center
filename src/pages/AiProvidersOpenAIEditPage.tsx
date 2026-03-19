@@ -13,6 +13,7 @@ import { useNotificationStore } from '@/stores';
 import { apiCallApi, getApiCallErrorMessage } from '@/services/api';
 import type { ApiKeyEntry } from '@/types';
 import { buildHeaderObject } from '@/utils/headers';
+import { copyToClipboard } from '@/utils/clipboard';
 import { buildApiKeyEntry, buildOpenAIChatCompletionsEndpoint } from '@/components/providers/utils';
 import type { OpenAIEditOutletContext } from './AiProvidersOpenAIEditLayout';
 import type { KeyTestStatus } from '@/stores/useOpenAIEditDraftStore';
@@ -367,6 +368,14 @@ export function AiProvidersOpenAIEditPage() {
     navigate('models');
   };
 
+  const copyApiKey = useCallback(
+    async (value: string) => {
+      const copied = await copyToClipboard(value);
+      showNotification(t(copied ? 'notification.link_copied' : 'notification.copy_failed'), copied ? 'success' : 'error');
+    },
+    [showNotification, t]
+  );
+
   const renderKeyEntries = (entries: ApiKeyEntry[]) => {
     const list = entries.length ? entries : [buildApiKeyEntry()];
 
@@ -470,9 +479,19 @@ export function AiProvidersOpenAIEditPage() {
                   <Button
                     variant="secondary"
                     size="sm"
+                    onClick={() => void copyApiKey(entry.apiKey)}
+                    disabled={saving || disableControls || isTestingKeys || !entry.apiKey?.trim()}
+                    className={styles.providerActionButtonCompact}
+                  >
+                    {t('common.copy')}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => void testSingleKey(index)}
                     disabled={saving || disableControls || isTestingKeys || !canTestKey}
                     loading={keyStatus === 'loading'}
+                    className={`${styles.modelTestSecondaryButton} ${styles.providerActionButtonCompact}`}
                   >
                     {t('ai_providers.openai_test_single_action')}
                   </Button>
@@ -481,6 +500,7 @@ export function AiProvidersOpenAIEditPage() {
                     size="sm"
                     onClick={() => removeEntry(index)}
                     disabled={saving || disableControls || isTestingKeys || list.length <= 1}
+                    className={styles.providerActionButtonCompact}
                   >
                     {t('common.delete')}
                   </Button>
@@ -656,21 +676,28 @@ export function AiProvidersOpenAIEditPage() {
                     ariaLabel={t('ai_providers.openai_test_title')}
                     disabled={saving || disableControls || isTestingKeys || testStatus === 'loading' || availableModels.length === 0}
                   />
-                  <Button
-                    variant={testStatus === 'error' ? 'danger' : 'secondary'}
-                    size="sm"
-                    onClick={() => void testAllKeys()}
-                    loading={testStatus === 'loading'}
-                    disabled={saving || disableControls || isTestingKeys || testStatus === 'loading' || !hasConfiguredModels || !hasTestableKeys}
-                    title={t('ai_providers.openai_test_all_hint')}
-                    className={styles.modelTestAllButton}
-                  >
-                    {t('ai_providers.openai_test_all_action')}
-                  </Button>
+                  <div className={styles.modelTestPanelActions}>
+                    <Button
+                      variant={testStatus === 'error' ? 'danger' : 'secondary'}
+                      size="sm"
+                      onClick={() => void testAllKeys()}
+                      loading={testStatus === 'loading'}
+                      disabled={saving || disableControls || isTestingKeys || testStatus === 'loading' || !hasConfiguredModels || !hasTestableKeys}
+                      title={t('ai_providers.openai_test_all_hint')}
+                      className={`${styles.modelTestAllButton} ${
+                        testStatus === 'error' ? styles.modelTestDangerButton : styles.modelTestSecondaryButton
+                      }`}
+                    >
+                      {t('ai_providers.openai_test_all_action')}
+                    </Button>
+                  </div>
                 </div>
               </div>
               {testMessage && (
                 <div
+                  className={styles.modelTestMessage}
+                >
+                  <div
                   className={`status-badge ${
                     testStatus === 'error'
                       ? 'error'
@@ -678,8 +705,9 @@ export function AiProvidersOpenAIEditPage() {
                         ? 'success'
                         : 'muted'
                   }`}
-                >
-                  {testMessage}
+                  >
+                    {testMessage}
+                  </div>
                 </div>
               )}
             </div>

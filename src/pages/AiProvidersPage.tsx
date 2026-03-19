@@ -7,14 +7,13 @@ import {
   CodexSection,
   GeminiSection,
   OpenAISection,
+  persistProviderConfigToggle,
   VertexSection,
   ProviderNav,
+  refreshMonitorProviderMeta,
+  setProviderEntryEnabled,
   useProviderStats,
 } from '@/components/providers';
-import {
-  withDisableAllModelsRule,
-  withoutDisableAllModelsRule,
-} from '@/components/providers/utils';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { ampcodeApi, providersApi } from '@/services/api';
 import { useAuthStore, useConfigStore, useNotificationStore, useThemeStore } from '@/stores';
@@ -164,6 +163,36 @@ export function AiProvidersPage() {
     [claudeConfigs, navigate]
   );
 
+  const duplicateGeminiConfig = useCallback(
+    (index: number) => {
+      const entry = geminiKeys[index];
+      if (!entry) return;
+      navigate('/ai-providers/gemini/new', {
+        state: {
+          fromAiProviders: true,
+          copySource: entry,
+          copyIndex: index,
+        },
+      });
+    },
+    [geminiKeys, navigate]
+  );
+
+  const duplicateCodexConfig = useCallback(
+    (index: number) => {
+      const entry = codexConfigs[index];
+      if (!entry) return;
+      navigate('/ai-providers/codex/new', {
+        state: {
+          fromAiProviders: true,
+          copySource: entry,
+          copyIndex: index,
+        },
+      });
+    },
+    [codexConfigs, navigate]
+  );
+
   const duplicateOpenAIProvider = useCallback(
     (index: number) => {
       const entry = openaiProviders[index];
@@ -216,10 +245,7 @@ export function AiProvidersPage() {
       setConfigSwitchingKey(switchingKey);
 
       const previousList = geminiKeys;
-      const nextExcluded = enabled
-        ? withoutDisableAllModelsRule(current.excludedModels)
-        : withDisableAllModelsRule(current.excludedModels);
-      const nextItem: GeminiKeyConfig = { ...current, excludedModels: nextExcluded };
+      const nextItem = setProviderEntryEnabled(current, enabled);
       const nextList = previousList.map((item, idx) => (idx === index ? nextItem : item));
 
       setGeminiKeys(nextList);
@@ -227,7 +253,13 @@ export function AiProvidersPage() {
       clearCache('gemini-api-key');
 
       try {
-        await providersApi.saveGeminiKeys(nextList);
+        await persistProviderConfigToggle({
+          list: previousList,
+          index,
+          enabled,
+          save: providersApi.saveGeminiKeys,
+          section: 'gemini-api-key',
+        });
         showNotification(
           enabled ? t('notification.config_enabled') : t('notification.config_disabled'),
           'success'
@@ -251,10 +283,7 @@ export function AiProvidersPage() {
       setConfigSwitchingKey(switchingKey);
 
       const previousList = openaiProviders;
-      const nextExcluded = enabled
-        ? withoutDisableAllModelsRule(current.excludedModels)
-        : withDisableAllModelsRule(current.excludedModels);
-      const nextItem: OpenAIProviderConfig = { ...current, excludedModels: nextExcluded };
+      const nextItem = setProviderEntryEnabled(current, enabled);
       const nextList = previousList.map((item, idx) => (idx === index ? nextItem : item));
 
       setOpenaiProviders(nextList);
@@ -262,7 +291,13 @@ export function AiProvidersPage() {
       clearCache('openai-compatibility');
 
       try {
-        await providersApi.saveOpenAIProviders(nextList);
+        await persistProviderConfigToggle({
+          list: previousList,
+          index,
+          enabled,
+          save: providersApi.saveOpenAIProviders,
+          section: 'openai-compatibility',
+        });
         showNotification(
           enabled ? t('notification.config_enabled') : t('notification.config_disabled'),
           'success'
@@ -293,10 +328,7 @@ export function AiProvidersPage() {
     setConfigSwitchingKey(switchingKey);
 
     const previousList = source;
-    const nextExcluded = enabled
-      ? withoutDisableAllModelsRule(current.excludedModels)
-      : withDisableAllModelsRule(current.excludedModels);
-    const nextItem: ProviderKeyConfig = { ...current, excludedModels: nextExcluded };
+    const nextItem = setProviderEntryEnabled(current, enabled);
     const nextList = previousList.map((item, idx) => (idx === index ? nextItem : item));
 
     if (provider === 'codex') {
@@ -314,13 +346,23 @@ export function AiProvidersPage() {
     }
 
     try {
-      if (provider === 'codex') {
-        await providersApi.saveCodexConfigs(nextList);
-      } else if (provider === 'claude') {
-        await providersApi.saveClaudeConfigs(nextList);
-      } else {
-        await providersApi.saveVertexConfigs(nextList);
-      }
+      await persistProviderConfigToggle({
+        list: previousList,
+        index,
+        enabled,
+        save:
+          provider === 'codex'
+            ? providersApi.saveCodexConfigs
+            : provider === 'claude'
+              ? providersApi.saveClaudeConfigs
+              : providersApi.saveVertexConfigs,
+        section:
+          provider === 'codex'
+            ? 'codex-api-key'
+            : provider === 'claude'
+              ? 'claude-api-key'
+              : 'vertex-api-key',
+      });
       showNotification(
         enabled ? t('notification.config_enabled') : t('notification.config_disabled'),
         'success'
@@ -359,19 +401,21 @@ export function AiProvidersPage() {
         try {
           if (type === 'codex') {
             await providersApi.deleteCodexConfig(entry.apiKey);
-            const next = codexConfigs.filter((_, idx) => idx !== index);
-            setCodexConfigs(next);
-            updateConfigValue('codex-api-key', next);
-            clearCache('codex-api-key');
-            showNotification(t('notification.codex_config_deleted'), 'success');
-          } else {
-            await providersApi.deleteClaudeConfig(entry.apiKey);
-            const next = claudeConfigs.filter((_, idx) => idx !== index);
-            setClaudeConfigs(next);
-            updateConfigValue('claude-api-key', next);
-            clearCache('claude-api-key');
-            showNotification(t('notification.claude_config_deleted'), 'success');
-          }
+          const next = codexConfigs.filter((_, idx) => idx !== index);
+          setCodexConfigs(next);
+          updateConfigValue('codex-api-key', next);
+          clearCache('codex-api-key');
+          await refreshMonitorProviderMeta();
+          showNotification(t('notification.codex_config_deleted'), 'success');
+        } else {
+          await providersApi.deleteClaudeConfig(entry.apiKey);
+          const next = claudeConfigs.filter((_, idx) => idx !== index);
+          setClaudeConfigs(next);
+          updateConfigValue('claude-api-key', next);
+          clearCache('claude-api-key');
+          await refreshMonitorProviderMeta();
+          showNotification(t('notification.claude_config_deleted'), 'success');
+        }
         } catch (err: unknown) {
           const message = getErrorMessage(err);
           showNotification(`${t('notification.delete_failed')}: ${message}`, 'error');
@@ -395,6 +439,7 @@ export function AiProvidersPage() {
           setVertexConfigs(next);
           updateConfigValue('vertex-api-key', next);
           clearCache('vertex-api-key');
+          await refreshMonitorProviderMeta();
           showNotification(t('notification.vertex_config_deleted'), 'success');
         } catch (err: unknown) {
           const message = getErrorMessage(err);
@@ -419,6 +464,7 @@ export function AiProvidersPage() {
           setOpenaiProviders(next);
           updateConfigValue('openai-compatibility', next);
           clearCache('openai-compatibility');
+          await refreshMonitorProviderMeta();
           showNotification(t('notification.openai_provider_deleted'), 'success');
         } catch (err: unknown) {
           const message = getErrorMessage(err);
@@ -443,6 +489,7 @@ export function AiProvidersPage() {
             disableControls={disableControls}
             isSwitching={isSwitching}
             onAdd={() => openEditor('/ai-providers/gemini/new')}
+            onDuplicate={duplicateGeminiConfig}
             onEdit={(index) => openEditor(`/ai-providers/gemini/${index}`)}
             onDelete={deleteGemini}
             onToggle={(index, enabled) => void setConfigEnabled('gemini', index, enabled)}
@@ -458,6 +505,7 @@ export function AiProvidersPage() {
             disableControls={disableControls}
             isSwitching={isSwitching}
             onAdd={() => openEditor('/ai-providers/codex/new')}
+            onDuplicate={duplicateCodexConfig}
             onEdit={(index) => openEditor(`/ai-providers/codex/${index}`)}
             onDelete={(index) => void deleteProviderEntry('codex', index)}
             onToggle={(index, enabled) => void setConfigEnabled('codex', index, enabled)}

@@ -24,6 +24,7 @@ interface GeminiSectionProps {
   disableControls: boolean;
   isSwitching: boolean;
   onAdd: () => void;
+  onDuplicate: (index: number) => void;
   onEdit: (index: number) => void;
   onDelete: (index: number) => void;
   onToggle: (index: number, enabled: boolean) => void;
@@ -37,6 +38,7 @@ export function GeminiSection({
   disableControls,
   isSwitching,
   onAdd,
+  onDuplicate,
   onEdit,
   onDelete,
   onToggle,
@@ -86,6 +88,17 @@ export function GeminiSection({
           onDelete={onDelete}
           actionsDisabled={actionsDisabled}
           getRowDisabled={(item) => hasDisableAllModelsRule(item.excludedModels)}
+          extraActionButtons={(_, index) => (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onDuplicate(index)}
+              disabled={actionsDisabled}
+              className={styles.providerActionButton}
+            >
+              {t('common.copy')}
+            </Button>
+          )}
           renderExtraActions={(item, index) => (
             <Button
               variant="secondary"

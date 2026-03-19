@@ -65,7 +65,6 @@ export function viteSingleFile(): Plugin {
           (output) => ({
             ...output,
             manualChunks: undefined,
-            codeSplitting: false
           })
         );
         return;
@@ -73,7 +72,6 @@ export function viteSingleFile(): Plugin {
       currentConfig.build.rollupOptions.output = {
         ...currentConfig.build.rollupOptions.output,
         manualChunks: undefined,
-        codeSplitting: false
       };
     },
     configResolved(resolvedConfig) {

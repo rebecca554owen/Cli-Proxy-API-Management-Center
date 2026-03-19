@@ -4,35 +4,47 @@ import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { HeaderInputList } from '@/components/ui/HeaderInputList';
-import { ModelInputList } from '@/components/ui/ModelInputList';
 import { Modal } from '@/components/ui/Modal';
 import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell';
+import {
+  ProviderGroupEditForm,
+  buildGeminiConfigsFromGroupForm,
+  buildProviderGroupEditSignature,
+  buildProviderGroupFormState,
+  groupProviderConfigs,
+  replaceGroupedConfigs,
+  resolveConnectivityErrorMessage,
+  runProviderConnectivityTest,
+} from '@/components/providers';
 import { modelsApi, providersApi } from '@/services/api';
 import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
 import type { GeminiKeyConfig } from '@/types';
-import { buildHeaderObject, headersToEntries, normalizeHeaderEntries } from '@/utils/headers';
+import { buildHeaderObject } from '@/utils/headers';
 import type { ModelInfo } from '@/utils/models';
-import { entriesToModels, modelsToEntries } from '@/components/ui/modelInputListUtils';
-import { excludedModelsToText, parseExcludedModels } from '@/components/providers/utils';
-import type { GeminiFormState } from '@/components/providers';
+import { copyToClipboard } from '@/utils/clipboard';
+import type { ProviderGroupFormState } from '@/components/providers';
 import layoutStyles from './AiProvidersEditLayout.module.scss';
 import styles from './AiProvidersPage.module.scss';
 
-type LocationState = { fromAiProviders?: boolean } | null;
+type LocationState =
+  | {
+      fromAiProviders?: boolean;
+      copySource?: GeminiKeyConfig;
+      copyIndex?: number;
+    }
+  | null;
 
-const buildEmptyForm = (): GeminiFormState => ({
-  apiKey: '',
-  priority: undefined,
-  prefix: '',
+const buildEmptyForm = (): ProviderGroupFormState => ({
   baseUrl: '',
-  proxyUrl: '',
+  prefix: '',
+  priority: undefined,
   headers: [],
   modelEntries: [{ name: '', alias: '' }],
-  excludedModels: [],
   excludedText: '',
+  testModel: '',
+  keyEntries: [{ apiKey: '', proxyUrl: '', headers: [], testStatus: 'idle', testMessage: '' }],
 });
 
 const parseIndexParam = (value: string | undefined) => {
@@ -45,30 +57,20 @@ const stripGeminiModelResourceName = (value: string) => {
   return String(value ?? '').trim().replace(/^\/?models\//i, '');
 };
 
-const normalizeModelEntries = (entries: Array<{ name: string; alias: string }>) =>
-  (entries ?? []).reduce<Array<{ name: string; alias: string }>>((acc, entry) => {
-    const name = stripGeminiModelResourceName(entry?.name ?? '').trim();
-    let alias = String(entry?.alias ?? '').trim();
-    if (name && alias === name) {
-      alias = '';
-    }
-    if (!name && !alias) return acc;
-    acc.push({ name, alias });
-    return acc;
-  }, []);
+const normalizeGeminiGroupForm = (form: ProviderGroupFormState): ProviderGroupFormState => ({
+  ...form,
+  modelEntries: form.modelEntries.map((entry) => ({
+    ...entry,
+    name: stripGeminiModelResourceName(entry.name),
+  })),
+  testModel: stripGeminiModelResourceName(form.testModel),
+});
 
-const buildGeminiSignature = (form: GeminiFormState) =>
-  JSON.stringify({
-    apiKey: String(form.apiKey ?? '').trim(),
-    priority:
-      form.priority !== undefined && Number.isFinite(form.priority) ? Math.trunc(form.priority) : null,
-    prefix: String(form.prefix ?? '').trim(),
-    baseUrl: String(form.baseUrl ?? '').trim(),
-    proxyUrl: String(form.proxyUrl ?? '').trim(),
-    headers: normalizeHeaderEntries(form.headers),
-    models: normalizeModelEntries(form.modelEntries),
-    excludedModels: parseExcludedModels(form.excludedText ?? ''),
-  });
+const getErrorMessage = (err: unknown) => {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  return '';
+};
 
 export function AiProvidersGeminiEditPage() {
   const { t } = useTranslation();
@@ -88,8 +90,13 @@ export function AiProvidersGeminiEditPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [form, setForm] = useState<GeminiFormState>(() => buildEmptyForm());
-  const [baselineSignature, setBaselineSignature] = useState(() => buildGeminiSignature(buildEmptyForm()));
+  const [form, setForm] = useState<ProviderGroupFormState>(() => buildEmptyForm());
+  const [baselineSignature, setBaselineSignature] = useState(() =>
+    buildProviderGroupEditSignature(buildEmptyForm())
+  );
+  const [summaryStatus, setSummaryStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [summaryMessage, setSummaryMessage] = useState('');
+  const [isTesting, setIsTesting] = useState(false);
 
   const [modelDiscoveryOpen, setModelDiscoveryOpen] = useState(false);
   const [modelDiscoveryEndpoint, setModelDiscoveryEndpoint] = useState('');
@@ -104,13 +111,12 @@ export function AiProvidersGeminiEditPage() {
   const hasIndexParam = typeof params.index === 'string';
   const editIndex = useMemo(() => parseIndexParam(params.index), [params.index]);
   const invalidIndexParam = hasIndexParam && editIndex === null;
-
-  const initialData = useMemo(() => {
-    if (editIndex === null) return undefined;
-    return configs[editIndex];
-  }, [configs, editIndex]);
-
-  const invalidIndex = editIndex !== null && !initialData;
+  const groupedConfigs = useMemo(() => groupProviderConfigs('gemini', configs), [configs]);
+  const initialGroup = useMemo(
+    () => (editIndex === null ? undefined : groupedConfigs.find((group) => group.indexes.includes(editIndex))),
+    [editIndex, groupedConfigs]
+  );
+  const invalidIndex = editIndex !== null && !initialGroup;
 
   const title =
     editIndex !== null ? t('ai_providers.gemini_edit_modal_title') : t('ai_providers.gemini_add_modal_title');
@@ -164,27 +170,71 @@ export function AiProvidersGeminiEditPage() {
   useEffect(() => {
     if (loading) return;
 
-    if (initialData) {
-      const { headers, models, ...rest } = initialData;
-      const nextForm: GeminiFormState = {
-        ...rest,
-        headers: headersToEntries(headers),
-        modelEntries: modelsToEntries(models).map((entry) => ({
-          ...entry,
-          name: stripGeminiModelResourceName(entry.name),
-        })),
-        excludedText: excludedModelsToText(initialData.excludedModels),
-      };
+    const locationState = location.state as LocationState;
+
+    if (initialGroup) {
+      const nextForm = normalizeGeminiGroupForm(buildProviderGroupFormState(initialGroup));
       setForm(nextForm);
-      setBaselineSignature(buildGeminiSignature(nextForm));
+      setBaselineSignature(buildProviderGroupEditSignature(nextForm));
       return;
     }
+
+    if (editIndex === null && typeof locationState?.copyIndex === 'number') {
+      const copyGroup = groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!));
+      if (copyGroup) {
+        const nextForm = normalizeGeminiGroupForm(buildProviderGroupFormState(copyGroup));
+        nextForm.keyEntries = nextForm.keyEntries.map((entry) => ({
+          ...entry,
+          apiKey: '',
+          testStatus: 'idle',
+          testMessage: '',
+        }));
+        setForm(nextForm);
+        setBaselineSignature(buildProviderGroupEditSignature(nextForm));
+        return;
+      }
+    }
+
     const nextForm = buildEmptyForm();
     setForm(nextForm);
-    setBaselineSignature(buildGeminiSignature(nextForm));
-  }, [initialData, loading]);
+    setBaselineSignature(buildProviderGroupEditSignature(nextForm));
+  }, [editIndex, groupedConfigs, initialGroup, loading, location.state]);
 
-  const canSave = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex;
+  const currentSignature = useMemo(() => buildProviderGroupEditSignature(form), [form]);
+  const isDirty = baselineSignature !== currentSignature;
+  const canGuard = !loading && !saving && !invalidIndexParam && !invalidIndex;
+
+  const { allowNextNavigation } = useUnsavedChangesGuard({
+    enabled: canGuard,
+    shouldBlock: ({ currentLocation, nextLocation }) =>
+      isDirty && currentLocation.pathname !== nextLocation.pathname,
+    dialog: {
+      title: t('common.unsaved_changes_title'),
+      message: t('common.unsaved_changes_message'),
+      confirmText: t('common.leave'),
+      cancelText: t('common.stay'),
+      variant: 'danger',
+    },
+  });
+
+  useEffect(() => {
+    const availableModels = form.modelEntries
+      .map((entry) => stripGeminiModelResourceName(entry.name))
+      .filter(Boolean);
+    if (availableModels.length === 0) {
+      if (form.testModel) {
+        setForm((prev) => ({ ...prev, testModel: '' }));
+      }
+      return;
+    }
+
+    const normalizedCurrent = stripGeminiModelResourceName(form.testModel);
+    if (!normalizedCurrent || !availableModels.includes(normalizedCurrent)) {
+      setForm((prev) => ({ ...prev, testModel: availableModels[0] }));
+    } else if (normalizedCurrent !== form.testModel) {
+      setForm((prev) => ({ ...prev, testModel: normalizedCurrent }));
+    }
+  }, [form.modelEntries, form.testModel]);
 
   const discoveredModelsFiltered = useMemo(() => {
     const filter = modelDiscoverySearch.trim().toLowerCase();
@@ -207,13 +257,15 @@ export function AiProvidersGeminiEditPage() {
         prev.modelEntries.forEach((entry) => {
           const name = stripGeminiModelResourceName(entry.name);
           if (!name) return;
-          mergedMap.set(name, { name, alias: entry.alias?.trim() || '' });
+          mergedMap.set(name.toLowerCase(), { name, alias: entry.alias?.trim() || '' });
         });
 
         selectedModels.forEach((model) => {
           const name = stripGeminiModelResourceName(model.name);
-          if (!name || mergedMap.has(name)) return;
-          mergedMap.set(name, { name, alias: model.alias ?? '' });
+          if (!name) return;
+          const key = name.toLowerCase();
+          if (mergedMap.has(key)) return;
+          mergedMap.set(key, { name, alias: model.alias ?? '' });
           addedCount += 1;
         });
 
@@ -228,18 +280,21 @@ export function AiProvidersGeminiEditPage() {
         showNotification(t('ai_providers.gemini_models_fetch_added', { count: addedCount }), 'success');
       }
     },
-    [setForm, showNotification, t]
+    [showNotification, t]
   );
 
   const fetchGeminiModelDiscovery = useCallback(async () => {
     const requestId = (modelDiscoveryRequestIdRef.current += 1);
     setModelDiscoveryFetching(true);
     setModelDiscoveryError('');
+
     const headerObject = buildHeaderObject(form.headers);
+    const firstApiKey = form.keyEntries.find((entry) => entry.apiKey.trim())?.apiKey.trim() || undefined;
+
     try {
       const list = await modelsApi.fetchGeminiModelsViaApiCall(
         form.baseUrl ?? '',
-        form.apiKey.trim() || undefined,
+        firstApiKey,
         headerObject
       );
       if (modelDiscoveryRequestIdRef.current !== requestId) return;
@@ -247,7 +302,7 @@ export function AiProvidersGeminiEditPage() {
     } catch (err: unknown) {
       if (modelDiscoveryRequestIdRef.current !== requestId) return;
       setDiscoveredModels([]);
-      const message = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+      const message = getErrorMessage(err);
       const hasCustomXGoogApiKey = Object.keys(headerObject).some(
         (key) => key.toLowerCase() === 'x-goog-api-key'
       );
@@ -256,7 +311,7 @@ export function AiProvidersGeminiEditPage() {
       );
       const shouldAttachDiag = message.toLowerCase().includes('api key') || message.includes('401');
       const diag = shouldAttachDiag
-        ? ` [diag: apiKeyField=${form.apiKey.trim() ? 'yes' : 'no'}, customXGoogApiKey=${
+        ? ` [diag: apiKeyField=${firstApiKey ? 'yes' : 'no'}, customXGoogApiKey=${
             hasCustomXGoogApiKey ? 'yes' : 'no'
           }, customAuthorization=${hasAuthorization ? 'yes' : 'no'}]`
         : '';
@@ -266,7 +321,7 @@ export function AiProvidersGeminiEditPage() {
         setModelDiscoveryFetching(false);
       }
     }
-  }, [form.apiKey, form.baseUrl, form.headers, t]);
+  }, [form.baseUrl, form.headers, form.keyEntries, t]);
 
   useEffect(() => {
     if (!modelDiscoveryOpen) {
@@ -283,6 +338,8 @@ export function AiProvidersGeminiEditPage() {
     setModelDiscoverySelected(new Set());
     setModelDiscoveryError('');
 
+    if (!nextEndpoint) return;
+
     const headerObject = buildHeaderObject(form.headers);
     const hasCustomXGoogApiKey = Object.keys(headerObject).some(
       (key) => key.toLowerCase() === 'x-goog-api-key'
@@ -290,21 +347,20 @@ export function AiProvidersGeminiEditPage() {
     const hasAuthorization = Object.keys(headerObject).some(
       (key) => key.toLowerCase() === 'authorization'
     );
-    const hasApiKeyField = Boolean(form.apiKey.trim());
-    const canAutoFetch = hasApiKeyField || hasCustomXGoogApiKey || hasAuthorization;
-
-    if (!canAutoFetch) return;
+    const firstKey = form.keyEntries.find((entry) => entry.apiKey.trim())?.apiKey.trim() || '';
+    const hasApiKeyField = Boolean(firstKey);
+    if (!hasApiKeyField && !hasCustomXGoogApiKey && !hasAuthorization) return;
 
     const headerSignature = Object.entries(headerObject)
       .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
       .map(([key, value]) => `${key}:${value}`)
       .join('|');
-    const signature = `${nextEndpoint}||${form.apiKey.trim()}||${headerSignature}`;
+    const signature = `${nextEndpoint}||${firstKey}||${headerSignature}`;
+
     if (autoFetchSignatureRef.current === signature) return;
     autoFetchSignatureRef.current = signature;
-
     void fetchGeminiModelDiscovery();
-  }, [fetchGeminiModelDiscovery, form.apiKey, form.baseUrl, form.headers, modelDiscoveryOpen]);
+  }, [fetchGeminiModelDiscovery, form.baseUrl, form.headers, form.keyEntries, modelDiscoveryOpen]);
 
   const toggleModelDiscoverySelection = (name: string) => {
     setModelDiscoverySelected((prev) => {
@@ -326,51 +382,173 @@ export function AiProvidersGeminiEditPage() {
     setModelDiscoveryOpen(false);
   };
 
-  const currentSignature = useMemo(() => buildGeminiSignature(form), [form]);
-  const isDirty = baselineSignature !== currentSignature;
-  const canGuard = !loading && !saving && !invalidIndexParam && !invalidIndex;
+  const resetConnectivityState = useCallback(() => {
+    setSummaryStatus('idle');
+    setSummaryMessage('');
+    setForm((prev) => ({
+      ...prev,
+      keyEntries: prev.keyEntries.map((entry) => ({
+        ...entry,
+        testStatus: 'idle',
+        testMessage: '',
+      })),
+    }));
+  }, []);
 
-  const { allowNextNavigation } = useUnsavedChangesGuard({
-    enabled: canGuard,
-    shouldBlock: ({ currentLocation, nextLocation }) =>
-      isDirty && currentLocation.pathname !== nextLocation.pathname,
-    dialog: {
-      title: t('common.unsaved_changes_title'),
-      message: t('common.unsaved_changes_message'),
-      confirmText: t('common.leave'),
-      cancelText: t('common.stay'),
-      variant: 'danger',
+  const runSingleKeyTest = useCallback(
+    async (keyIndex: number) => {
+      const modelName =
+        stripGeminiModelResourceName(form.testModel) ||
+        stripGeminiModelResourceName(form.modelEntries.find((entry) => entry.name.trim())?.name || '');
+
+      if (!modelName) {
+        const message = t('notification.gemini_test_model_required');
+        setSummaryStatus('error');
+        setSummaryMessage(message);
+        showNotification(message, 'error');
+        return false;
+      }
+
+      const target = form.keyEntries[keyIndex];
+      if (!target?.apiKey.trim()) {
+        return false;
+      }
+
+      setForm((prev) => ({
+        ...prev,
+        keyEntries: prev.keyEntries.map((entry, index) =>
+          index === keyIndex ? { ...entry, testStatus: 'loading', testMessage: '' } : entry
+        ),
+      }));
+
+      try {
+        await runProviderConnectivityTest({
+          provider: 'gemini',
+          baseUrl: form.baseUrl,
+          testModel: modelName,
+          headers: form.headers,
+          apiKey: target.apiKey,
+          proxyUrl: target.proxyUrl,
+        });
+
+        setForm((prev) => ({
+          ...prev,
+          keyEntries: prev.keyEntries.map((entry, index) =>
+            index === keyIndex ? { ...entry, testStatus: 'success', testMessage: '' } : entry
+          ),
+        }));
+        return true;
+      } catch (err: unknown) {
+        const message = resolveConnectivityErrorMessage('gemini', err, t);
+        setForm((prev) => ({
+          ...prev,
+          keyEntries: prev.keyEntries.map((entry, index) =>
+            index === keyIndex ? { ...entry, testStatus: 'error', testMessage: message } : entry
+          ),
+        }));
+        return false;
+      }
     },
-  });
+    [form.baseUrl, form.headers, form.keyEntries, form.modelEntries, form.testModel, showNotification, t]
+  );
+
+  const testOne = useCallback(
+    async (keyIndex: number) => {
+      if (isTesting) return;
+      setIsTesting(true);
+      try {
+        await runSingleKeyTest(keyIndex);
+      } finally {
+        setIsTesting(false);
+      }
+    },
+    [isTesting, runSingleKeyTest]
+  );
+
+  const testAll = useCallback(async () => {
+    if (isTesting) return;
+
+    const validIndexes = form.keyEntries
+      .map((entry, index) => (entry.apiKey.trim() ? index : -1))
+      .filter((index) => index >= 0);
+
+    if (!validIndexes.length) {
+      const message = t('notification.gemini_test_key_required');
+      setSummaryStatus('error');
+      setSummaryMessage(message);
+      showNotification(message, 'error');
+      return;
+    }
+
+    setIsTesting(true);
+    setSummaryStatus('loading');
+    setSummaryMessage(t('ai_providers.gemini_test_running'));
+    setForm((prev) => ({
+      ...prev,
+      keyEntries: prev.keyEntries.map((entry) => ({
+        ...entry,
+        testStatus: entry.apiKey.trim() ? 'loading' : 'idle',
+        testMessage: '',
+      })),
+    }));
+
+    try {
+      const results = await Promise.all(validIndexes.map((index) => runSingleKeyTest(index)));
+      const successCount = results.filter(Boolean).length;
+      const failCount = validIndexes.length - successCount;
+
+      if (failCount === 0) {
+        const message = t('ai_providers.gemini_test_all_success', { count: successCount });
+        setSummaryStatus('success');
+        setSummaryMessage(message);
+        showNotification(message, 'success');
+      } else if (successCount === 0) {
+        const message = t('ai_providers.gemini_test_all_failed', { count: failCount });
+        setSummaryStatus('error');
+        setSummaryMessage(message);
+        showNotification(message, 'error');
+      } else {
+        const message = t('ai_providers.gemini_test_all_partial', {
+          success: successCount,
+          failed: failCount,
+        });
+        setSummaryStatus('error');
+        setSummaryMessage(message);
+        showNotification(message, 'warning');
+      }
+    } finally {
+      setIsTesting(false);
+    }
+  }, [form.keyEntries, isTesting, runSingleKeyTest, showNotification, t]);
 
   const handleSave = useCallback(async () => {
-    if (!canSave) return;
+    if (disableControls || saving || loading || invalidIndexParam || invalidIndex) return;
+
+    const normalizedForm = normalizeGeminiGroupForm(form);
+    const payloads = buildGeminiConfigsFromGroupForm(normalizedForm);
+    if (!payloads.length) {
+      showNotification(t('notification.gemini_test_key_required'), 'error');
+      return;
+    }
 
     setSaving(true);
     setError('');
+
     try {
-      const normalizedModelEntries = form.modelEntries.map((entry) => ({
-        ...entry,
-        name: stripGeminiModelResourceName(entry.name),
-      }));
+      const locationState = location.state as LocationState;
+      const copyGroup =
+        editIndex === null && typeof locationState?.copyIndex === 'number'
+          ? groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!))
+          : undefined;
 
-      const payload: GeminiKeyConfig = {
-        apiKey: form.apiKey.trim(),
-        priority: form.priority !== undefined ? Math.trunc(form.priority) : undefined,
-        prefix: form.prefix?.trim() || undefined,
-        baseUrl: form.baseUrl?.trim() || undefined,
-        proxyUrl: form.proxyUrl?.trim() || undefined,
-        headers: buildHeaderObject(form.headers),
-        models: entriesToModels(normalizedModelEntries),
-        excludedModels: parseExcludedModels(form.excludedText),
-      };
-
-      const nextList =
-        editIndex !== null
-          ? configs.map((item, idx) => (idx === editIndex ? payload : item))
-          : [...configs, payload];
+      const nextList = initialGroup
+        ? replaceGroupedConfigs(configs, initialGroup.indexes, payloads)
+        : copyGroup
+          ? replaceGroupedConfigs(configs, [], payloads, Math.max(...copyGroup.indexes) + 1)
+          : [...configs, ...payloads];
 
       await providersApi.saveGeminiKeys(nextList);
+      setConfigs(nextList);
       updateConfigValue('gemini-api-key', nextList);
       clearCache('gemini-api-key');
       showNotification(
@@ -378,7 +556,7 @@ export function AiProvidersGeminiEditPage() {
         'success'
       );
       allowNextNavigation();
-      setBaselineSignature(buildGeminiSignature(form));
+      setBaselineSignature(buildProviderGroupEditSignature(normalizedForm));
       handleBack();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '';
@@ -389,19 +567,34 @@ export function AiProvidersGeminiEditPage() {
     }
   }, [
     allowNextNavigation,
-    canSave,
     clearCache,
     configs,
+    disableControls,
     editIndex,
     form,
+    groupedConfigs,
     handleBack,
+    initialGroup,
+    invalidIndex,
+    invalidIndexParam,
+    loading,
+    location.state,
+    saving,
     showNotification,
     t,
     updateConfigValue,
   ]);
 
-  const canOpenModelDiscovery = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex;
-  const canApplyModelDiscovery = !disableControls && !saving && !modelDiscoveryFetching;
+  const copyConfig = useCallback(async () => {
+    const text = JSON.stringify(buildGeminiConfigsFromGroupForm(normalizeGeminiGroupForm(form)), null, 2);
+    const copied = await copyToClipboard(text);
+    showNotification(
+      t(copied ? 'notification.link_copied' : 'notification.copy_failed'),
+      copied ? 'success' : 'error'
+    );
+  }, [form, showNotification, t]);
+
+  const canSave = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex && !isTesting;
 
   return (
     <SecondaryScreenShell
@@ -425,7 +618,7 @@ export function AiProvidersGeminiEditPage() {
           </Button>
           <Button
             size="sm"
-            onClick={handleSave}
+            onClick={() => void handleSave()}
             loading={saving}
             disabled={!canSave}
             className={layoutStyles.floatingSaveButton}
@@ -443,120 +636,25 @@ export function AiProvidersGeminiEditPage() {
           <div className="hint">{t('common.invalid_provider_index')}</div>
         ) : (
           <>
-            <Input
-              label={t('ai_providers.gemini_add_modal_key_label')}
-              placeholder={t('ai_providers.gemini_add_modal_key_placeholder')}
-              value={form.apiKey}
-              onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
-              disabled={disableControls || saving}
-            />
-            <Input
-              label={t('ai_providers.priority_label')}
-              hint={t('ai_providers.priority_hint')}
-              type="number"
-              step={1}
-              value={form.priority ?? ''}
-              onChange={(e) => {
-                const raw = e.target.value;
-                const parsed = raw.trim() === '' ? undefined : Number(raw);
-                setForm((prev) => ({
-                  ...prev,
-                  priority: parsed !== undefined && Number.isFinite(parsed) ? parsed : undefined,
-                }));
+            <ProviderGroupEditForm
+              provider="gemini"
+              form={form}
+              setForm={(updater) => {
+                setForm((prev) => {
+                  const next = updater(prev);
+                  return next;
+                });
+                resetConnectivityState();
               }}
               disabled={disableControls || saving}
+              testing={isTesting}
+              summaryStatus={summaryStatus}
+              summaryMessage={summaryMessage}
+              onTestAll={testAll}
+              onTestOne={testOne}
+              onOpenModelDiscovery={() => setModelDiscoveryOpen(true)}
+              onCopyConfig={copyConfig}
             />
-            <Input
-              label={t('ai_providers.prefix_label')}
-              placeholder={t('ai_providers.prefix_placeholder')}
-              value={form.prefix ?? ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, prefix: e.target.value }))}
-              hint={t('ai_providers.prefix_hint')}
-              disabled={disableControls || saving}
-            />
-            <Input
-              label={t('ai_providers.gemini_base_url_label')}
-              placeholder={t('ai_providers.gemini_base_url_placeholder')}
-              value={form.baseUrl ?? ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))}
-              disabled={disableControls || saving}
-            />
-            <Input
-              label={t('ai_providers.gemini_add_modal_proxy_label')}
-              placeholder={t('ai_providers.gemini_add_modal_proxy_placeholder')}
-              value={form.proxyUrl ?? ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, proxyUrl: e.target.value }))}
-              disabled={disableControls || saving}
-            />
-            <HeaderInputList
-              entries={form.headers}
-              onChange={(entries) => setForm((prev) => ({ ...prev, headers: entries }))}
-              addLabel={t('common.custom_headers_add')}
-              keyPlaceholder={t('common.custom_headers_key_placeholder')}
-              valuePlaceholder={t('common.custom_headers_value_placeholder')}
-              removeButtonTitle={t('common.delete')}
-              removeButtonAriaLabel={t('common.delete')}
-              disabled={disableControls || saving}
-            />
-
-            <div className={styles.modelConfigSection}>
-              <div className={styles.modelConfigHeader}>
-                <label className={styles.modelConfigTitle}>{t('ai_providers.gemini_models_label')}</label>
-                <div className={styles.modelConfigToolbar}>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() =>
-                      setForm((prev) => ({
-                        ...prev,
-                        modelEntries: [...prev.modelEntries, { name: '', alias: '' }],
-                      }))
-                    }
-                    disabled={disableControls || saving}
-                  >
-                    {t('ai_providers.gemini_models_add_btn')}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setModelDiscoveryOpen(true)}
-                    disabled={!canOpenModelDiscovery}
-                  >
-                    {t('ai_providers.gemini_models_fetch_button')}
-                  </Button>
-                </div>
-              </div>
-              <div className={styles.sectionHint}>{t('ai_providers.gemini_models_hint')}</div>
-
-              <ModelInputList
-                entries={form.modelEntries}
-                onChange={(entries) => setForm((prev) => ({ ...prev, modelEntries: entries }))}
-                namePlaceholder={t('common.model_name_placeholder')}
-                aliasPlaceholder={t('common.model_alias_placeholder')}
-                aliasFirst
-                disabled={disableControls || saving}
-                hideAddButton
-                className={styles.modelInputList}
-                rowClassName={styles.modelInputRow}
-                inputClassName={styles.modelInputField}
-                removeButtonClassName={styles.modelRowRemoveButton}
-                removeButtonTitle={t('common.delete')}
-                removeButtonAriaLabel={t('common.delete')}
-              />
-            </div>
-
-            <div className="form-group">
-              <label>{t('ai_providers.excluded_models_label')}</label>
-              <textarea
-                className="input"
-                placeholder={t('ai_providers.excluded_models_placeholder')}
-                value={form.excludedText}
-                onChange={(e) => setForm((prev) => ({ ...prev, excludedText: e.target.value }))}
-                rows={4}
-                disabled={disableControls || saving}
-              />
-              <div className="hint">{t('ai_providers.excluded_models_hint')}</div>
-            </div>
 
             <Modal
               open={modelDiscoveryOpen}
@@ -573,7 +671,11 @@ export function AiProvidersGeminiEditPage() {
                   >
                     {t('common.cancel')}
                   </Button>
-                  <Button size="sm" onClick={handleApplyDiscoveredModels} disabled={!canApplyModelDiscovery}>
+                  <Button
+                    size="sm"
+                    onClick={handleApplyDiscoveredModels}
+                    disabled={disableControls || saving || modelDiscoveryFetching}
+                  >
                     {t('ai_providers.gemini_models_fetch_apply')}
                   </Button>
                 </>
@@ -635,13 +737,13 @@ export function AiProvidersGeminiEditPage() {
                           <div className={styles.modelDiscoveryMeta}>
                             <div className={styles.modelDiscoveryName}>
                               {model.name}
-                              {model.alias && (
+                              {model.alias ? (
                                 <span className={styles.modelDiscoveryAlias}>{model.alias}</span>
-                              )}
+                              ) : null}
                             </div>
-                            {model.description && (
+                            {model.description ? (
                               <div className={styles.modelDiscoveryDesc}>{model.description}</div>
-                            )}
+                            ) : null}
                           </div>
                         </label>
                       );

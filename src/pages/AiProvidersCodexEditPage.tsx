@@ -4,38 +4,50 @@ import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { HeaderInputList } from '@/components/ui/HeaderInputList';
-import { ModelInputList } from '@/components/ui/ModelInputList';
 import { Modal } from '@/components/ui/Modal';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell';
+import {
+  ProviderGroupEditForm,
+  buildProviderConfigsFromGroupForm,
+  buildProviderGroupEditSignature,
+  buildProviderGroupFormState,
+  groupProviderConfigs,
+  refreshMonitorProviderMeta,
+  replaceGroupedConfigs,
+  resolveConnectivityErrorMessage,
+  runProviderConnectivityTest,
+} from '@/components/providers';
 import { modelsApi, providersApi } from '@/services/api';
 import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
 import type { ProviderKeyConfig } from '@/types';
-import { buildHeaderObject, headersToEntries, normalizeHeaderEntries } from '@/utils/headers';
-import { entriesToModels, modelsToEntries } from '@/components/ui/modelInputListUtils';
-import { excludedModelsToText, parseExcludedModels } from '@/components/providers/utils';
-import type { ProviderFormState } from '@/components/providers';
+import { buildHeaderObject } from '@/utils/headers';
 import type { ModelInfo } from '@/utils/models';
+import { copyToClipboard } from '@/utils/clipboard';
+import type { ProviderGroupFormState } from '@/components/providers';
 import layoutStyles from './AiProvidersEditLayout.module.scss';
 import styles from './AiProvidersPage.module.scss';
 
-type LocationState = { fromAiProviders?: boolean } | null;
+type LocationState =
+  | {
+      fromAiProviders?: boolean;
+      copySource?: ProviderKeyConfig;
+      copyIndex?: number;
+    }
+  | null;
 
-const buildEmptyForm = (): ProviderFormState => ({
-  apiKey: '',
-  priority: undefined,
-  prefix: '',
+const buildEmptyForm = (): ProviderGroupFormState => ({
   baseUrl: '',
-  websockets: false,
-  proxyUrl: '',
+  prefix: '',
+  priority: undefined,
   headers: [],
-  models: [],
-  excludedModels: [],
   modelEntries: [{ name: '', alias: '' }],
   excludedText: '',
+  testModel: '',
+  keyEntries: [{ apiKey: '', proxyUrl: '', headers: [], testStatus: 'idle', testMessage: '' }],
+  websockets: false,
 });
 
 const parseIndexParam = (value: string | undefined) => {
@@ -49,32 +61,6 @@ const getErrorMessage = (err: unknown) => {
   if (typeof err === 'string') return err;
   return '';
 };
-
-const normalizeModelEntries = (entries: Array<{ name: string; alias: string }>) =>
-  (entries ?? []).reduce<Array<{ name: string; alias: string }>>((acc, entry) => {
-    const name = String(entry?.name ?? '').trim();
-    let alias = String(entry?.alias ?? '').trim();
-    if (name && alias === name) {
-      alias = '';
-    }
-    if (!name && !alias) return acc;
-    acc.push({ name, alias });
-    return acc;
-  }, []);
-
-const buildCodexSignature = (form: ProviderFormState) =>
-  JSON.stringify({
-    apiKey: String(form.apiKey ?? '').trim(),
-    priority:
-      form.priority !== undefined && Number.isFinite(form.priority) ? Math.trunc(form.priority) : null,
-    prefix: String(form.prefix ?? '').trim(),
-    baseUrl: String(form.baseUrl ?? '').trim(),
-    websockets: Boolean(form.websockets),
-    proxyUrl: String(form.proxyUrl ?? '').trim(),
-    headers: normalizeHeaderEntries(form.headers),
-    models: normalizeModelEntries(form.modelEntries),
-    excludedModels: parseExcludedModels(form.excludedText ?? ''),
-  });
 
 export function AiProvidersCodexEditPage() {
   const { t } = useTranslation();
@@ -94,8 +80,13 @@ export function AiProvidersCodexEditPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [form, setForm] = useState<ProviderFormState>(() => buildEmptyForm());
-  const [baselineSignature, setBaselineSignature] = useState(() => buildCodexSignature(buildEmptyForm()));
+  const [form, setForm] = useState<ProviderGroupFormState>(() => buildEmptyForm());
+  const [baselineSignature, setBaselineSignature] = useState(() =>
+    buildProviderGroupEditSignature(buildEmptyForm())
+  );
+  const [summaryStatus, setSummaryStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [summaryMessage, setSummaryMessage] = useState('');
+  const [isTesting, setIsTesting] = useState(false);
 
   const [modelDiscoveryOpen, setModelDiscoveryOpen] = useState(false);
   const [modelDiscoveryEndpoint, setModelDiscoveryEndpoint] = useState('');
@@ -110,13 +101,12 @@ export function AiProvidersCodexEditPage() {
   const hasIndexParam = typeof params.index === 'string';
   const editIndex = useMemo(() => parseIndexParam(params.index), [params.index]);
   const invalidIndexParam = hasIndexParam && editIndex === null;
-
-  const initialData = useMemo(() => {
-    if (editIndex === null) return undefined;
-    return configs[editIndex];
-  }, [configs, editIndex]);
-
-  const invalidIndex = editIndex !== null && !initialData;
+  const groupedConfigs = useMemo(() => groupProviderConfigs('codex', configs), [configs]);
+  const initialGroup = useMemo(
+    () => (editIndex === null ? undefined : groupedConfigs.find((group) => group.indexes.includes(editIndex))),
+    [editIndex, groupedConfigs]
+  );
+  const invalidIndex = editIndex !== null && !initialGroup;
 
   const title =
     editIndex !== null ? t('ai_providers.codex_edit_modal_title') : t('ai_providers.codex_add_modal_title');
@@ -169,25 +159,34 @@ export function AiProvidersCodexEditPage() {
 
   useEffect(() => {
     if (loading) return;
-
-    if (initialData) {
-      const nextForm: ProviderFormState = {
-        ...initialData,
-        websockets: Boolean(initialData.websockets),
-        headers: headersToEntries(initialData.headers),
-        modelEntries: modelsToEntries(initialData.models),
-        excludedText: excludedModelsToText(initialData.excludedModels),
-      };
+    const locationState = location.state as LocationState;
+    if (initialGroup) {
+      const nextForm = buildProviderGroupFormState(initialGroup);
       setForm(nextForm);
-      setBaselineSignature(buildCodexSignature(nextForm));
+      setBaselineSignature(buildProviderGroupEditSignature(nextForm));
       return;
+    }
+    if (editIndex === null && typeof locationState?.copyIndex === 'number') {
+      const copyGroup = groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!));
+      if (copyGroup) {
+        const nextForm = buildProviderGroupFormState(copyGroup);
+        nextForm.keyEntries = nextForm.keyEntries.map((entry) => ({
+          ...entry,
+          apiKey: '',
+          testStatus: 'idle',
+          testMessage: '',
+        }));
+        setForm(nextForm);
+        setBaselineSignature(buildProviderGroupEditSignature(nextForm));
+        return;
+      }
     }
     const nextForm = buildEmptyForm();
     setForm(nextForm);
-    setBaselineSignature(buildCodexSignature(nextForm));
-  }, [initialData, loading]);
+    setBaselineSignature(buildProviderGroupEditSignature(nextForm));
+  }, [editIndex, groupedConfigs, initialGroup, loading, location.state]);
 
-  const currentSignature = useMemo(() => buildCodexSignature(form), [form]);
+  const currentSignature = useMemo(() => buildProviderGroupEditSignature(form), [form]);
   const isDirty = baselineSignature !== currentSignature;
   const canGuard = !loading && !saving && !invalidIndexParam && !invalidIndex;
 
@@ -204,7 +203,18 @@ export function AiProvidersCodexEditPage() {
     },
   });
 
-  const canSave = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex;
+  useEffect(() => {
+    const availableModels = form.modelEntries.map((entry) => entry.name.trim()).filter(Boolean);
+    if (availableModels.length === 0) {
+      if (form.testModel) {
+        setForm((prev) => ({ ...prev, testModel: '' }));
+      }
+      return;
+    }
+    if (!form.testModel || !availableModels.includes(form.testModel)) {
+      setForm((prev) => ({ ...prev, testModel: availableModels[0] }));
+    }
+  }, [form.modelEntries, form.testModel]);
 
   const discoveredModelsFiltered = useMemo(() => {
     const filter = modelDiscoverySearch.trim().toLowerCase();
@@ -220,7 +230,6 @@ export function AiProvidersCodexEditPage() {
   const mergeDiscoveredModels = useCallback(
     (selectedModels: ModelInfo[]) => {
       if (!selectedModels.length) return;
-
       let addedCount = 0;
       setForm((prev) => {
         const mergedMap = new Map<string, { name: string; alias: string }>();
@@ -229,7 +238,6 @@ export function AiProvidersCodexEditPage() {
           if (!name) return;
           mergedMap.set(name.toLowerCase(), { name, alias: entry.alias?.trim() || '' });
         });
-
         selectedModels.forEach((model) => {
           const name = String(model.name ?? '').trim();
           if (!name) return;
@@ -238,32 +246,29 @@ export function AiProvidersCodexEditPage() {
           mergedMap.set(key, { name, alias: model.alias ?? '' });
           addedCount += 1;
         });
-
         const mergedEntries = Array.from(mergedMap.values());
         return {
           ...prev,
           modelEntries: mergedEntries.length ? mergedEntries : [{ name: '', alias: '' }],
         };
       });
-
       if (addedCount > 0) {
         showNotification(t('ai_providers.codex_models_fetch_added', { count: addedCount }), 'success');
       }
     },
-    [setForm, showNotification, t]
+    [showNotification, t]
   );
 
   const fetchCodexModelDiscovery = useCallback(async () => {
     const requestId = (modelDiscoveryRequestIdRef.current += 1);
     setModelDiscoveryFetching(true);
     setModelDiscoveryError('');
-
     try {
       const headerObject = buildHeaderObject(form.headers);
       const hasCustomAuthorization = Object.keys(headerObject).some(
         (key) => key.toLowerCase() === 'authorization'
       );
-      const apiKey = form.apiKey.trim() || undefined;
+      const apiKey = form.keyEntries.find((entry) => entry.apiKey.trim())?.apiKey.trim() || undefined;
       const list = await modelsApi.fetchV1ModelsViaApiCall(
         form.baseUrl ?? '',
         hasCustomAuthorization ? undefined : apiKey,
@@ -274,14 +279,13 @@ export function AiProvidersCodexEditPage() {
     } catch (err: unknown) {
       if (modelDiscoveryRequestIdRef.current !== requestId) return;
       setDiscoveredModels([]);
-      const message = getErrorMessage(err);
-      setModelDiscoveryError(`${t('ai_providers.codex_models_fetch_error')}: ${message}`);
+      setModelDiscoveryError(`${t('ai_providers.codex_models_fetch_error')}: ${getErrorMessage(err)}`);
     } finally {
       if (modelDiscoveryRequestIdRef.current === requestId) {
         setModelDiscoveryFetching(false);
       }
     }
-  }, [form.apiKey, form.baseUrl, form.headers, t]);
+  }, [form.baseUrl, form.headers, form.keyEntries, t]);
 
   useEffect(() => {
     if (!modelDiscoveryOpen) {
@@ -290,44 +294,37 @@ export function AiProvidersCodexEditPage() {
       setModelDiscoveryFetching(false);
       return;
     }
-
     const nextEndpoint = modelsApi.buildV1ModelsEndpoint(form.baseUrl ?? '');
     setModelDiscoveryEndpoint(nextEndpoint);
     setDiscoveredModels([]);
     setModelDiscoverySearch('');
     setModelDiscoverySelected(new Set());
     setModelDiscoveryError('');
-
     if (!nextEndpoint) return;
 
     const headerObject = buildHeaderObject(form.headers);
     const hasCustomAuthorization = Object.keys(headerObject).some(
       (key) => key.toLowerCase() === 'authorization'
     );
-    const hasApiKeyField = Boolean(form.apiKey.trim());
-    const canAutoFetch = hasApiKeyField || hasCustomAuthorization;
-
-    if (!canAutoFetch) return;
+    const hasApiKeyField = form.keyEntries.some((entry) => entry.apiKey.trim());
+    if (!hasApiKeyField && !hasCustomAuthorization) return;
 
     const headerSignature = Object.entries(headerObject)
       .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
       .map(([key, value]) => `${key}:${value}`)
       .join('|');
-    const signature = `${nextEndpoint}||${form.apiKey.trim()}||${headerSignature}`;
+    const firstKey = form.keyEntries.find((entry) => entry.apiKey.trim())?.apiKey.trim() || '';
+    const signature = `${nextEndpoint}||${firstKey}||${headerSignature}`;
     if (autoFetchSignatureRef.current === signature) return;
     autoFetchSignatureRef.current = signature;
-
     void fetchCodexModelDiscovery();
-  }, [fetchCodexModelDiscovery, form.apiKey, form.baseUrl, form.headers, modelDiscoveryOpen]);
+  }, [fetchCodexModelDiscovery, form.baseUrl, form.headers, form.keyEntries, modelDiscoveryOpen]);
 
   const toggleModelDiscoverySelection = (name: string) => {
     setModelDiscoverySelected((prev) => {
       const next = new Set(prev);
-      if (next.has(name)) {
-        next.delete(name);
-      } else {
-        next.add(name);
-      }
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
       return next;
     });
   };
@@ -340,45 +337,181 @@ export function AiProvidersCodexEditPage() {
     setModelDiscoveryOpen(false);
   };
 
-  const handleSave = useCallback(async () => {
-    if (!canSave) return;
+  const resetConnectivityState = useCallback(() => {
+    setSummaryStatus('idle');
+    setSummaryMessage('');
+    setForm((prev) => ({
+      ...prev,
+      keyEntries: prev.keyEntries.map((entry) => ({
+        ...entry,
+        testStatus: 'idle',
+        testMessage: '',
+      })),
+    }));
+  }, []);
 
-    const trimmedBaseUrl = (form.baseUrl ?? '').trim();
-    const baseUrl = trimmedBaseUrl || undefined;
-    if (!baseUrl) {
+  const runSingleKeyTest = useCallback(
+    async (keyIndex: number) => {
+      const modelName = form.testModel.trim() || form.modelEntries.find((entry) => entry.name.trim())?.name || '';
+      if (!form.baseUrl.trim()) {
+        const message = t('notification.codex_base_url_required');
+        setSummaryStatus('error');
+        setSummaryMessage(message);
+        showNotification(message, 'error');
+        return;
+      }
+      if (!modelName) {
+        const message = t('notification.codex_test_model_required');
+        setSummaryStatus('error');
+        setSummaryMessage(message);
+        showNotification(message, 'error');
+        return;
+      }
+      const target = form.keyEntries[keyIndex];
+      if (!target?.apiKey.trim()) {
+        return;
+      }
+      setForm((prev) => ({
+        ...prev,
+        keyEntries: prev.keyEntries.map((entry, index) =>
+          index === keyIndex ? { ...entry, testStatus: 'loading', testMessage: '' } : entry
+        ),
+      }));
+      try {
+        await runProviderConnectivityTest({
+          provider: 'codex',
+          baseUrl: form.baseUrl,
+          testModel: modelName,
+          headers: form.headers,
+          apiKey: target.apiKey,
+          proxyUrl: target.proxyUrl,
+        });
+        setForm((prev) => ({
+          ...prev,
+          keyEntries: prev.keyEntries.map((entry, index) =>
+            index === keyIndex ? { ...entry, testStatus: 'success', testMessage: '' } : entry
+          ),
+        }));
+      } catch (err: unknown) {
+        const message = resolveConnectivityErrorMessage('codex', err, t);
+        setForm((prev) => ({
+          ...prev,
+          keyEntries: prev.keyEntries.map((entry, index) =>
+            index === keyIndex ? { ...entry, testStatus: 'error', testMessage: message } : entry
+          ),
+        }));
+      }
+    },
+    [form.baseUrl, form.headers, form.keyEntries, form.modelEntries, form.testModel, showNotification, t]
+  );
+
+  const testOne = useCallback(
+    async (keyIndex: number) => {
+      if (isTesting) return;
+      setIsTesting(true);
+      try {
+        await runSingleKeyTest(keyIndex);
+      } finally {
+        setIsTesting(false);
+      }
+    },
+    [isTesting, runSingleKeyTest]
+  );
+
+  const testAll = useCallback(async () => {
+    if (isTesting) return;
+    const validIndexes = form.keyEntries
+      .map((entry, index) => (entry.apiKey.trim() ? index : -1))
+      .filter((index) => index >= 0);
+    if (!validIndexes.length) {
+      const message = t('notification.codex_test_key_required');
+      setSummaryStatus('error');
+      setSummaryMessage(message);
+      showNotification(message, 'error');
+      return;
+    }
+    setIsTesting(true);
+    setSummaryStatus('loading');
+    setSummaryMessage(t('ai_providers.codex_test_running'));
+    setForm((prev) => ({
+      ...prev,
+      keyEntries: prev.keyEntries.map((entry) => ({
+        ...entry,
+        testStatus: entry.apiKey.trim() ? 'loading' : 'idle',
+        testMessage: '',
+      })),
+    }));
+    try {
+      await Promise.all(validIndexes.map((index) => runSingleKeyTest(index)));
+      const nextEntries = form.keyEntries;
+      const successCount = nextEntries.filter((entry) => entry.testStatus === 'success').length;
+      const failCount = validIndexes.length - successCount;
+      if (failCount === 0) {
+        const message = t('ai_providers.codex_test_all_success', { count: successCount });
+        setSummaryStatus('success');
+        setSummaryMessage(message);
+        showNotification(message, 'success');
+      } else if (successCount === 0) {
+        const message = t('ai_providers.codex_test_all_failed', { count: failCount });
+        setSummaryStatus('error');
+        setSummaryMessage(message);
+        showNotification(message, 'error');
+      } else {
+        const message = t('ai_providers.codex_test_all_partial', {
+          success: successCount,
+          failed: failCount,
+        });
+        setSummaryStatus('error');
+        setSummaryMessage(message);
+        showNotification(message, 'warning');
+      }
+    } finally {
+      setIsTesting(false);
+    }
+  }, [form.keyEntries, isTesting, runSingleKeyTest, showNotification, t]);
+
+  const handleSave = useCallback(async () => {
+    if (disableControls || saving || loading || invalidIndexParam || invalidIndex) return;
+    if (!form.baseUrl.trim()) {
       showNotification(t('notification.codex_base_url_required'), 'error');
       return;
     }
-
+    const payloads = buildProviderConfigsFromGroupForm(form);
+    if (!payloads.length) {
+      showNotification(t('notification.codex_test_key_required'), 'error');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
-      const payload: ProviderKeyConfig = {
-        apiKey: form.apiKey.trim(),
-        priority: form.priority !== undefined ? Math.trunc(form.priority) : undefined,
-        prefix: form.prefix?.trim() || undefined,
-        baseUrl,
-        websockets: Boolean(form.websockets),
-        proxyUrl: form.proxyUrl?.trim() || undefined,
-        headers: buildHeaderObject(form.headers),
-        models: entriesToModels(form.modelEntries),
-        excludedModels: parseExcludedModels(form.excludedText),
-      };
-
+      const locationState = location.state as LocationState;
+      const copyGroup =
+        editIndex === null && typeof locationState?.copyIndex === 'number'
+          ? groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!))
+          : undefined;
       const nextList =
-        editIndex !== null
-          ? configs.map((item, idx) => (idx === editIndex ? payload : item))
-          : [...configs, payload];
+        initialGroup
+          ? replaceGroupedConfigs(configs, initialGroup.indexes, payloads)
+          : copyGroup
+            ? replaceGroupedConfigs(
+                configs,
+                [],
+                payloads,
+                Math.max(...copyGroup.indexes) + 1
+              )
+            : [...configs, ...payloads];
 
       await providersApi.saveCodexConfigs(nextList);
+      setConfigs(nextList);
       updateConfigValue('codex-api-key', nextList);
       clearCache('codex-api-key');
+      await refreshMonitorProviderMeta();
       showNotification(
         editIndex !== null ? t('notification.codex_config_updated') : t('notification.codex_config_added'),
         'success'
       );
       allowNextNavigation();
-      setBaselineSignature(buildCodexSignature(form));
+      setBaselineSignature(buildProviderGroupEditSignature(form));
       handleBack();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '';
@@ -389,25 +522,34 @@ export function AiProvidersCodexEditPage() {
     }
   }, [
     allowNextNavigation,
-    canSave,
     clearCache,
     configs,
+    disableControls,
     editIndex,
     form,
+    groupedConfigs,
     handleBack,
+    initialGroup,
+    invalidIndex,
+    invalidIndexParam,
+    loading,
+    location.state,
+    saving,
     showNotification,
     t,
     updateConfigValue,
   ]);
 
-  const canOpenModelDiscovery =
-    !disableControls &&
-    !saving &&
-    !loading &&
-    !invalidIndexParam &&
-    !invalidIndex &&
-    Boolean((form.baseUrl ?? '').trim());
-  const canApplyModelDiscovery = !disableControls && !saving && !modelDiscoveryFetching;
+  const copyConfig = useCallback(async () => {
+    const text = JSON.stringify(buildProviderConfigsFromGroupForm(form), null, 2);
+    const copied = await copyToClipboard(text);
+    showNotification(
+      t(copied ? 'notification.link_copied' : 'notification.copy_failed'),
+      copied ? 'success' : 'error'
+    );
+  }, [form, showNotification, t]);
+
+  const canSave = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex && !isTesting;
 
   return (
     <SecondaryScreenShell
@@ -431,7 +573,7 @@ export function AiProvidersCodexEditPage() {
           </Button>
           <Button
             size="sm"
-            onClick={handleSave}
+            onClick={() => void handleSave()}
             loading={saving}
             disabled={!canSave}
             className={layoutStyles.floatingSaveButton}
@@ -449,126 +591,40 @@ export function AiProvidersCodexEditPage() {
           <div className="hint">{t('common.invalid_provider_index')}</div>
         ) : (
           <>
-            <Input
-              label={t('ai_providers.codex_add_modal_key_label')}
-              value={form.apiKey}
-              onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
-              disabled={disableControls || saving}
-            />
-            <Input
-              label={t('ai_providers.priority_label')}
-              hint={t('ai_providers.priority_hint')}
-              type="number"
-              step={1}
-              value={form.priority ?? ''}
-              onChange={(e) => {
-                const raw = e.target.value;
-                const parsed = raw.trim() === '' ? undefined : Number(raw);
-                setForm((prev) => ({
-                  ...prev,
-                  priority: parsed !== undefined && Number.isFinite(parsed) ? parsed : undefined,
-                }));
+            <ProviderGroupEditForm
+              provider="codex"
+              form={form}
+              setForm={(updater) => {
+                setForm((prev) => {
+                  const next = updater(prev);
+                  return next;
+                });
+                resetConnectivityState();
               }}
               disabled={disableControls || saving}
-            />
-            <Input
-              label={t('ai_providers.prefix_label')}
-              placeholder={t('ai_providers.prefix_placeholder')}
-              value={form.prefix ?? ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, prefix: e.target.value }))}
-              hint={t('ai_providers.prefix_hint')}
-              disabled={disableControls || saving}
-            />
-            <Input
-              label={t('ai_providers.codex_add_modal_url_label')}
-              value={form.baseUrl ?? ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))}
-              disabled={disableControls || saving}
-            />
-            <div className="form-group">
-              <label>{t('ai_providers.codex_websockets_label')}</label>
-              <ToggleSwitch
-                checked={Boolean(form.websockets)}
-                onChange={(value) => setForm((prev) => ({ ...prev, websockets: value }))}
-                disabled={disableControls || saving}
-                ariaLabel={t('ai_providers.codex_websockets_label')}
-              />
-              <div className="hint">{t('ai_providers.codex_websockets_hint')}</div>
-            </div>
-            <Input
-              label={t('ai_providers.codex_add_modal_proxy_label')}
-              value={form.proxyUrl ?? ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, proxyUrl: e.target.value }))}
-              disabled={disableControls || saving}
-            />
-            <HeaderInputList
-              entries={form.headers}
-              onChange={(entries) => setForm((prev) => ({ ...prev, headers: entries }))}
-              addLabel={t('common.custom_headers_add')}
-              keyPlaceholder={t('common.custom_headers_key_placeholder')}
-              valuePlaceholder={t('common.custom_headers_value_placeholder')}
-              removeButtonTitle={t('common.delete')}
-              removeButtonAriaLabel={t('common.delete')}
-              disabled={disableControls || saving}
-            />
-
-            <div className={styles.modelConfigSection}>
-              <div className={styles.modelConfigHeader}>
-                <label className={styles.modelConfigTitle}>{t('ai_providers.codex_models_label')}</label>
-                <div className={styles.modelConfigToolbar}>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() =>
-                      setForm((prev) => ({
-                        ...prev,
-                        modelEntries: [...prev.modelEntries, { name: '', alias: '' }],
-                      }))
-                    }
-                    disabled={disableControls || saving}
-                  >
-                    {t('ai_providers.codex_models_add_btn')}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setModelDiscoveryOpen(true)}
-                    disabled={!canOpenModelDiscovery}
-                  >
-                    {t('ai_providers.codex_models_fetch_button')}
-                  </Button>
+              testing={isTesting}
+              summaryStatus={summaryStatus}
+              summaryMessage={summaryMessage}
+              onTestAll={testAll}
+              onTestOne={testOne}
+              onOpenModelDiscovery={() => setModelDiscoveryOpen(true)}
+              onCopyConfig={copyConfig}
+              renderExtraFields={
+                <div className="form-group">
+                  <label>{t('ai_providers.codex_websockets_label')}</label>
+                  <ToggleSwitch
+                    checked={Boolean(form.websockets)}
+                    onChange={(value) => {
+                      setForm((prev) => ({ ...prev, websockets: value }));
+                      resetConnectivityState();
+                    }}
+                    disabled={disableControls || saving || isTesting}
+                    ariaLabel={t('ai_providers.codex_websockets_label')}
+                  />
+                  <div className="hint">{t('ai_providers.codex_websockets_hint')}</div>
                 </div>
-              </div>
-              <div className={styles.sectionHint}>{t('ai_providers.codex_models_hint')}</div>
-
-              <ModelInputList
-                entries={form.modelEntries}
-                onChange={(entries) => setForm((prev) => ({ ...prev, modelEntries: entries }))}
-                namePlaceholder={t('common.model_name_placeholder')}
-                aliasPlaceholder={t('common.model_alias_placeholder')}
-                aliasFirst
-                disabled={disableControls || saving}
-                hideAddButton
-                className={styles.modelInputList}
-                rowClassName={styles.modelInputRow}
-                inputClassName={styles.modelInputField}
-                removeButtonClassName={styles.modelRowRemoveButton}
-                removeButtonTitle={t('common.delete')}
-                removeButtonAriaLabel={t('common.delete')}
-              />
-            </div>
-            <div className="form-group">
-              <label>{t('ai_providers.excluded_models_label')}</label>
-              <textarea
-                className="input"
-                placeholder={t('ai_providers.excluded_models_placeholder')}
-                value={form.excludedText}
-                onChange={(e) => setForm((prev) => ({ ...prev, excludedText: e.target.value }))}
-                rows={4}
-                disabled={disableControls || saving}
-              />
-              <div className="hint">{t('ai_providers.excluded_models_hint')}</div>
-            </div>
+              }
+            />
 
             <Modal
               open={modelDiscoveryOpen}
@@ -588,7 +644,7 @@ export function AiProvidersCodexEditPage() {
                   <Button
                     size="sm"
                     onClick={handleApplyDiscoveredModels}
-                    disabled={!canApplyModelDiscovery}
+                    disabled={disableControls || saving || modelDiscoveryFetching}
                   >
                     {t('ai_providers.codex_models_fetch_apply')}
                   </Button>
@@ -622,7 +678,7 @@ export function AiProvidersCodexEditPage() {
                   label={t('ai_providers.codex_models_search_label')}
                   placeholder={t('ai_providers.codex_models_search_placeholder')}
                   value={modelDiscoverySearch}
-                  onChange={(e) => setModelDiscoverySearch(e.target.value)}
+                  onChange={(event) => setModelDiscoverySearch(event.target.value)}
                   disabled={modelDiscoveryFetching}
                 />
                 {modelDiscoveryError && <div className="error-box">{modelDiscoveryError}</div>}
@@ -651,13 +707,13 @@ export function AiProvidersCodexEditPage() {
                           <div className={styles.modelDiscoveryMeta}>
                             <div className={styles.modelDiscoveryName}>
                               {model.name}
-                              {model.alias && (
+                              {model.alias ? (
                                 <span className={styles.modelDiscoveryAlias}>{model.alias}</span>
-                              )}
+                              ) : null}
                             </div>
-                            {model.description && (
+                            {model.description ? (
                               <div className={styles.modelDiscoveryDesc}>{model.description}</div>
-                            )}
+                            ) : null}
                           </div>
                         </label>
                       );

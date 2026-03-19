@@ -2,11 +2,12 @@ import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { authFilesApi, providersApi } from '@/services/api';
-import { useConfigStore, useNotificationStore } from '@/stores';
+import { useNotificationStore } from '@/stores';
 import { copyToClipboard } from '@/utils/clipboard';
-import { withDisableAllModelsRule, withoutDisableAllModelsRule } from '@/components/providers/utils';
+import {
+  persistProviderConfigToggle,
+} from '@/components/providers/providerConfigActions';
 import type { GeminiKeyConfig, OpenAIProviderConfig, ProviderKeyConfig } from '@/types';
-import type { RawConfigSection } from '@/types/config';
 import type { MonitorSourceMeta } from '@/utils/monitor';
 
 interface UseMonitorChannelActionsOptions {
@@ -49,19 +50,6 @@ const resolveOpenAIProviderIndex = (
   });
 };
 
-const toggleExcludedModels = <T extends { excludedModels?: string[] }>(entry: T, disabled: boolean): T => {
-  const excludedModels = disabled
-    ? withoutDisableAllModelsRule(entry.excludedModels)
-    : withDisableAllModelsRule(entry.excludedModels);
-  return { ...entry, excludedModels };
-};
-
-const syncConfigSection = (section: RawConfigSection, value: unknown) => {
-  const { updateConfigValue, clearCache } = useConfigStore.getState();
-  updateConfigValue(section, value);
-  clearCache(section);
-};
-
 export function useMonitorChannelActions(
   options: UseMonitorChannelActionsOptions
 ): UseMonitorChannelActionsReturn {
@@ -98,12 +86,13 @@ export function useMonitorChannelActions(
     if (index < 0) {
       throw new Error(t('monitor.logs.disable_error_no_provider'));
     }
-    const current = list[index];
-    const nextList = list.map((item, idx) =>
-      idx === index ? toggleExcludedModels(current, meta.disabled) : item
-    );
-    await providersApi.saveGeminiKeys(nextList);
-    syncConfigSection('gemini-api-key', nextList);
+    await persistProviderConfigToggle({
+      list,
+      index,
+      enabled: meta.disabled,
+      save: providersApi.saveGeminiKeys,
+      section: 'gemini-api-key',
+    });
   }, [t]);
 
   const updateProviderSource = useCallback(
@@ -118,19 +107,18 @@ export function useMonitorChannelActions(
       if (index < 0) {
         throw new Error(t('monitor.logs.disable_error_no_provider'));
       }
-      const current = list[index];
-      const nextList = list.map((item, idx) =>
-        idx === index ? toggleExcludedModels(current, meta.disabled) : item
-      );
-      await save(nextList);
-      syncConfigSection(
+      await persistProviderConfigToggle({
+        list,
+        index,
+        enabled: meta.disabled,
+        save,
+        section:
         load === providersApi.getClaudeConfigs
           ? 'claude-api-key'
           : load === providersApi.getCodexConfigs
             ? 'codex-api-key'
             : 'vertex-api-key',
-        nextList
-      );
+      });
     },
     [t]
   );
@@ -141,12 +129,13 @@ export function useMonitorChannelActions(
     if (index < 0) {
       throw new Error(t('monitor.logs.disable_error_no_provider'));
     }
-    const current = list[index];
-    const nextList = list.map((item, idx) =>
-      idx === index ? toggleExcludedModels(current, meta.disabled) : item
-    );
-    await providersApi.saveOpenAIProviders(nextList);
-    syncConfigSection('openai-compatibility', nextList);
+    await persistProviderConfigToggle({
+      list,
+      index,
+      enabled: meta.disabled,
+      save: providersApi.saveOpenAIProviders,
+      section: 'openai-compatibility',
+    });
   }, [t]);
 
   const toggleSource = useCallback(async (source: string) => {

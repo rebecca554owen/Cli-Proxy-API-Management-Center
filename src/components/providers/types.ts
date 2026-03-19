@@ -18,6 +18,49 @@ export interface OpenAIFormState {
   apiKeyEntries: ApiKeyEntry[];
 }
 
+export type ProviderKind = 'gemini' | 'codex' | 'claude' | 'openai';
+
+export interface ProviderKeyEntryDraft {
+  apiKey: string;
+  proxyUrl: string;
+  headers: HeaderEntry[];
+  testStatus: 'idle' | 'loading' | 'success' | 'error';
+  testMessage: string;
+}
+
+export interface ProviderGroupFormState {
+  name?: string;
+  baseUrl: string;
+  prefix: string;
+  priority?: number;
+  headers: HeaderEntry[];
+  modelEntries: ModelEntry[];
+  excludedText: string;
+  testModel: string;
+  keyEntries: ProviderKeyEntryDraft[];
+  websockets?: boolean;
+  cloak?: ProviderFormState['cloak'];
+}
+
+export interface ProviderConfigGroup<TConfig> {
+  id: string;
+  provider: Exclude<ProviderKind, 'openai'>;
+  title: string;
+  baseUrl: string;
+  prefix: string;
+  priority?: number;
+  headers: Record<string, string>;
+  models: Array<{ name: string; alias?: string }>;
+  excludedModels: string[];
+  configs: TConfig[];
+  indexes: number[];
+  primaryIndex: number;
+  enabled: boolean;
+  proxyUrls: string[];
+  websockets?: boolean;
+  cloak?: ProviderKeyConfig['cloak'];
+}
+
 export interface AmpcodeUpstreamApiKeyEntry {
   upstreamApiKey: string;
   clientApiKeysText: string;

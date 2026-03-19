@@ -18,9 +18,7 @@ import { ProviderStatusBar } from '../ProviderStatusBar';
 import {
   formatProviderEndpoint,
   getOpenAIProviderStats,
-  getTotalRequests,
   hasDisableAllModelsRule,
-  summarizeMappings
 } from '../utils';
 
 interface OpenAISectionProps {
@@ -133,19 +131,10 @@ export function OpenAISection({
           )}
           renderContent={(item, index) => {
             const stats = getOpenAIProviderStats(item.apiKeyEntries, keyStats, item.prefix);
-            const totalRequests = getTotalRequests(stats);
             const apiKeyEntries = item.apiKeyEntries || [];
             const configDisabled = hasDisableAllModelsRule(item.excludedModels);
             const statusData =
               statusBarCache.get(item.name || `openai-provider-${index}`) || calculateStatusBarData([]);
-            const mappingSummary = summarizeMappings(
-              (item.models ?? []).map((model) => ({
-                source: model.alias || model.name,
-                target: model.name,
-              })),
-              6
-            );
-            const mappingCount = mappingSummary.visible.length + mappingSummary.hiddenCount;
             const endpoint = formatProviderEndpoint(item.baseUrl);
             const groupName = item.prefix?.trim() || item.name || endpoint;
             const firstKey = apiKeyEntries[0]?.apiKey;
@@ -154,12 +143,12 @@ export function OpenAISection({
               <Fragment>
                 <div className={styles.providerCardHeader}>
                   <div className={styles.providerCardLead}>
-                    <div className={styles.providerMainTitle}>{item.name}</div>
-                    <div className={styles.providerKeyGroup}>{groupName}</div>
                     <div className={`${styles.providerMetaLine} ${styles.providerMetaInline}`}>
                       <span>P</span>
                       <span className={styles.providerPriorityBadge}>{item.priority ?? 0}</span>
                     </div>
+                    <div className={styles.providerMainTitle}>{item.name}</div>
+                    <div className={styles.providerKeyGroup}>{groupName}</div>
                   </div>
                   <div className={styles.providerMetricGrid}>
                     <div className={styles.providerStatusStats}>
@@ -174,32 +163,7 @@ export function OpenAISection({
                 </div>
                 <div className={styles.providerCardBody}>
                   <div className={styles.providerStatusRow}>
-                    <div className={styles.providerRequestMeta}>
-                      <span className={styles.providerRequestCount}>
-                        Req <strong>{totalRequests}</strong>
-                      </span>
-                    </div>
                     <ProviderStatusBar statusData={statusData} />
-                  </div>
-                  <div className={styles.providerModelsColumn}>
-                    <div className={styles.providerModelHeader}>
-                      <div className={styles.providerColumnTitle}>模型映射</div>
-                      <span className={styles.providerRequestCount}>
-                        映射 <strong>{mappingCount}</strong>
-                      </span>
-                    </div>
-                    <div className={styles.providerModelList}>
-                      {mappingSummary.visible.map((model, summaryIndex) => (
-                        <div key={`${model.source}-${model.target}-${summaryIndex}`} className={styles.providerModelItem}>
-                          <span className={styles.providerModelSource}>{model.source}</span>
-                          <span className={styles.providerModelArrow}>-&gt;</span>
-                          <span className={styles.providerModelTarget}>{model.target}</span>
-                        </div>
-                      ))}
-                      {mappingSummary.hiddenCount > 0 && (
-                        <div className={styles.providerModelMore}>+{mappingSummary.hiddenCount}</div>
-                      )}
-                    </div>
                   </div>
                   <div className={styles.providerInfoSummary}>
                     <div className={styles.providerInfoCluster}>

@@ -406,6 +406,14 @@
   border-radius: $radius-md;
 }
 
+.providerActionButtonCompact {
+  min-height: 32px;
+  padding-left: 10px;
+  padding-right: 10px;
+  border-radius: $radius-md;
+  white-space: nowrap;
+}
+
 .providerDisableButton {
   border-color: rgba(239, 68, 68, 0.4) !important;
   background: rgba(239, 68, 68, 0.1) !important;
@@ -1177,6 +1185,13 @@
   }
 }
 
+.modelTestPanelActions {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  flex-wrap: wrap;
+}
+
 .modelTestMeta {
   display: flex;
   flex-direction: column;
@@ -1379,6 +1394,21 @@
 .modelTestAllButton {
   white-space: nowrap;
   flex-shrink: 0;
+  min-height: 32px;
+}
+
+.modelTestSecondaryButton {
+  min-height: 32px;
+}
+
+.modelTestDangerButton {
+  min-height: 32px;
+}
+
+.modelTestMessage {
+  margin-top: $spacing-xs;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .statusIconWrapper {
