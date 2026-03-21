@@ -127,7 +127,7 @@ export function OpenAISection({
                 <div className={styles.providerCardHeader}>
                   <div className={styles.providerCardLead}>
                     <div className={`${styles.providerMetaLine} ${styles.providerMetaInline}`}>
-                      <span>P</span>
+                      <span>{t('common.priority')}:</span>
                       <span className={styles.providerPriorityBadge}>{item.priority ?? 0}</span>
                     </div>
                     <div
@@ -137,7 +137,9 @@ export function OpenAISection({
                     >
                       {identity.title}
                     </div>
-                    {identity.subtitle && <div className={styles.providerKeyGroup}>{identity.subtitle}</div>}
+                    {identity.subtitle && (
+                      <div className={styles.providerKeyGroup}>{identity.subtitle}</div>
+                    )}
                   </div>
                   <div className={styles.providerMetricGrid}>
                     <div className={styles.providerStatusStats}>

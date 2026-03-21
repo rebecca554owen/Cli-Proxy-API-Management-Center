@@ -67,6 +67,9 @@ const fnv1a64Hex = (value: string): string => {
 const looksLikeRawSecret = (text: string): boolean => {
   if (!text || /\s/.test(text)) return false;
 
+  // 掩码字符（*, ., …）不是原始密钥
+  if (/[.*…]/.test(text)) return false;
+
   const lower = text.toLowerCase();
   if (lower.endsWith('.json')) return false;
   if (lower.startsWith('http://') || lower.startsWith('https://')) return false;
@@ -121,13 +124,23 @@ export function normalizeUsageSourceId(
   value: unknown,
   masker: (val: string) => string = maskApiKey
 ): string {
-  const raw = typeof value === 'string' ? value : value === null || value === undefined ? '' : String(value);
+  const raw =
+    typeof value === 'string' ? value : value === null || value === undefined ? '' : String(value);
   const trimmed = raw.trim();
   if (!trimmed) return '';
 
   const extracted = extractRawSecretFromText(trimmed);
   if (extracted) {
     return `${USAGE_SOURCE_PREFIX_KEY}${fnv1a64Hex(extracted)}`;
+  }
+
+  // 检测掩码字符（*, ., …）— 即使长度超出 MASKED_TOKEN_HINT_REGEX 也能识别
+  if (/[.*…]/.test(trimmed)) {
+    const standardized = masker(trimmed);
+    // 合理长度的掩码用 m: 前缀，过长的保留原文
+    return standardized.length <= 50
+      ? `${USAGE_SOURCE_PREFIX_MASKED}${standardized}`
+      : `${USAGE_SOURCE_PREFIX_TEXT}${trimmed}`;
   }
 
   if (MASKED_TOKEN_HINT_REGEX.test(trimmed)) {
@@ -137,7 +150,10 @@ export function normalizeUsageSourceId(
   return `${USAGE_SOURCE_PREFIX_TEXT}${trimmed}`;
 }
 
-export function buildCandidateUsageSourceIds(input: { apiKey?: string; prefix?: string }): string[] {
+export function buildCandidateUsageSourceIds(input: {
+  apiKey?: string;
+  prefix?: string;
+}): string[] {
   const result: string[] = [];
 
   const prefix = input.prefix?.trim();
@@ -210,14 +226,24 @@ export function calculateStatusBarData(
 
   usageDetails.forEach((detail) => {
     const timestamp =
-      typeof detail.__timestampMs === 'number' ? detail.__timestampMs : Date.parse(detail.timestamp);
-    if (!Number.isFinite(timestamp) || timestamp <= 0 || timestamp < windowStart || timestamp > now) {
+      typeof detail.__timestampMs === 'number'
+        ? detail.__timestampMs
+        : Date.parse(detail.timestamp);
+    if (
+      !Number.isFinite(timestamp) ||
+      timestamp <= 0 ||
+      timestamp < windowStart ||
+      timestamp > now
+    ) {
       return;
     }
     if (sourceFilter !== undefined && detail.source !== sourceFilter) {
       return;
     }
-    if (authIndexFilter !== undefined && normalizeAuthIndex(detail.auth_index) !== String(authIndexFilter)) {
+    if (
+      authIndexFilter !== undefined &&
+      normalizeAuthIndex(detail.auth_index) !== String(authIndexFilter)
+    ) {
       return;
     }
 

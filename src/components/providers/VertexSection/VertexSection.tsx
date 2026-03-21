@@ -1,4 +1,4 @@
-import { Fragment, useMemo } from 'react';
+import { Fragment } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -7,9 +7,9 @@ import type { ProviderKeyConfig } from '@/types';
 import { maskApiKey } from '@/utils/format';
 import {
   buildCandidateUsageSourceIds,
-  calculateStatusBarData,
+  lookupStatusBar,
   type KeyStats,
-  type UsageDetail,
+  type StatusBarData,
 } from '@/utils/usage';
 import styles from '@/pages/AiProvidersPage.module.scss';
 import { ProviderList } from '../ProviderList';
@@ -26,7 +26,7 @@ import {
 interface VertexSectionProps {
   configs: ProviderKeyConfig[];
   keyStats: KeyStats;
-  usageDetails: UsageDetail[];
+  statusBarBySource: Map<string, StatusBarData>;
   loading: boolean;
   disableControls: boolean;
   isSwitching: boolean;
@@ -39,7 +39,7 @@ interface VertexSectionProps {
 export function VertexSection({
   configs,
   keyStats,
-  usageDetails,
+  statusBarBySource,
   loading,
   disableControls,
   isSwitching,
@@ -51,17 +51,6 @@ export function VertexSection({
   const { t } = useTranslation();
   const actionsDisabled = disableControls || loading || isSwitching;
   const toggleDisabled = disableControls || loading || isSwitching;
-  const statusBarCache = useMemo(() => {
-    const cache = new Map<string, ReturnType<typeof calculateStatusBarData>>();
-    configs.forEach((config) => {
-      const candidates = buildCandidateUsageSourceIds({ apiKey: config.apiKey, prefix: config.prefix });
-      if (!candidates.length) return;
-      const candidateSet = new Set(candidates);
-      const filteredDetails = usageDetails.filter((detail) => candidateSet.has(detail.source));
-      cache.set(config.apiKey, calculateStatusBarData(filteredDetails));
-    });
-    return cache;
-  }, [configs, usageDetails]);
 
   return (
     <>
@@ -113,7 +102,10 @@ export function VertexSection({
             const configDisabled = hasDisableAllModelsRule(item.excludedModels);
             const excludedModels = item.excludedModels ?? [];
             const totalRequests = getTotalRequests(stats);
-            const statusData = statusBarCache.get(item.apiKey) || calculateStatusBarData([]);
+            const statusData = lookupStatusBar(
+              statusBarBySource,
+              buildCandidateUsageSourceIds({ apiKey: item.apiKey, prefix: item.prefix })
+            );
             const mappingSummary = summarizeMappings(
               (item.models ?? []).map((model) => ({
                 source: model.alias || model.name,
@@ -134,7 +126,7 @@ export function VertexSection({
                 <div className={styles.providerCardHeader}>
                   <div className={styles.providerCardLead}>
                     <div className={`${styles.providerMetaLine} ${styles.providerMetaInline}`}>
-                      <span>P</span>
+                      <span>{t('common.priority')}:</span>
                       <span className={styles.providerPriorityBadge}>{item.priority ?? 0}</span>
                     </div>
                     <div className={styles.providerMainTitle}>
@@ -147,7 +139,9 @@ export function VertexSection({
                     >
                       {identity.title}
                     </div>
-                    {identity.subtitle && <div className={styles.providerKeyGroup}>{identity.subtitle}</div>}
+                    {identity.subtitle && (
+                      <div className={styles.providerKeyGroup}>{identity.subtitle}</div>
+                    )}
                   </div>
                   <div className={styles.providerMetricGrid}>
                     <div className={styles.providerStatusStats}>
@@ -188,7 +182,9 @@ export function VertexSection({
                         </div>
                       ))}
                       {mappingSummary.hiddenCount > 0 && (
-                        <div className={styles.providerModelMore}>+{mappingSummary.hiddenCount}</div>
+                        <div className={styles.providerModelMore}>
+                          +{mappingSummary.hiddenCount}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -230,7 +226,10 @@ export function VertexSection({
                       </div>
                       <div className={styles.modelTagList}>
                         {excludedModels.map((model) => (
-                          <span key={model} className={`${styles.modelTag} ${styles.excludedModelTag}`}>
+                          <span
+                            key={model}
+                            className={`${styles.modelTag} ${styles.excludedModelTag}`}
+                          >
                             <span className={styles.modelName}>{model}</span>
                           </span>
                         ))}

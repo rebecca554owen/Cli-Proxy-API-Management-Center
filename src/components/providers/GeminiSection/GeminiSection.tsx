@@ -1,4 +1,4 @@
-import { Fragment, useMemo } from 'react';
+import { Fragment } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -7,9 +7,9 @@ import type { GeminiKeyConfig } from '@/types';
 import { maskApiKey } from '@/utils/format';
 import {
   buildCandidateUsageSourceIds,
-  calculateStatusBarData,
+  lookupStatusBar,
   type KeyStats,
-  type UsageDetail,
+  type StatusBarData,
 } from '@/utils/usage';
 import styles from '@/pages/AiProvidersPage.module.scss';
 import { ProviderList } from '../ProviderList';
@@ -25,7 +25,7 @@ import {
 interface GeminiSectionProps {
   configs: GeminiKeyConfig[];
   keyStats: KeyStats;
-  usageDetails: UsageDetail[];
+  statusBarBySource: Map<string, StatusBarData>;
   loading: boolean;
   disableControls: boolean;
   isSwitching: boolean;
@@ -39,7 +39,7 @@ interface GeminiSectionProps {
 export function GeminiSection({
   configs,
   keyStats,
-  usageDetails,
+  statusBarBySource,
   loading,
   disableControls,
   isSwitching,
@@ -52,17 +52,6 @@ export function GeminiSection({
   const { t } = useTranslation();
   const actionsDisabled = disableControls || loading || isSwitching;
   const toggleDisabled = disableControls || loading || isSwitching;
-  const statusBarCache = useMemo(() => {
-    const cache = new Map<string, ReturnType<typeof calculateStatusBarData>>();
-    configs.forEach((config) => {
-      const candidates = buildCandidateUsageSourceIds({ apiKey: config.apiKey, prefix: config.prefix });
-      if (!candidates.length) return;
-      const candidateSet = new Set(candidates);
-      const filteredDetails = usageDetails.filter((detail) => candidateSet.has(detail.source));
-      cache.set(config.apiKey, calculateStatusBarData(filteredDetails));
-    });
-    return cache;
-  }, [configs, usageDetails]);
 
   return (
     <>
@@ -124,18 +113,24 @@ export function GeminiSection({
             const stats = getStatsBySource(item.apiKey, keyStats, item.prefix);
             const configDisabled = hasDisableAllModelsRule(item.excludedModels);
             const excludedModels = item.excludedModels ?? [];
-            const statusData = statusBarCache.get(item.apiKey) || calculateStatusBarData([]);
-            const mappingSummary = summarizeMappings([
-              ...(item.models ?? []).map((model) => ({
-                source: model.alias || model.name,
-                target: model.name,
-              })),
-              ...excludedModels.map((model) => ({
-                source: model,
-                target: '已排除',
-                muted: true,
-              })),
-            ], 6);
+            const statusData = lookupStatusBar(
+              statusBarBySource,
+              buildCandidateUsageSourceIds({ apiKey: item.apiKey, prefix: item.prefix })
+            );
+            const mappingSummary = summarizeMappings(
+              [
+                ...(item.models ?? []).map((model) => ({
+                  source: model.alias || model.name,
+                  target: model.name,
+                })),
+                ...excludedModels.map((model) => ({
+                  source: model,
+                  target: '已排除',
+                  muted: true,
+                })),
+              ],
+              6
+            );
             const endpoint = formatProviderEndpoint(item.baseUrl);
             const identity = buildProviderIdentityPresentation({
               primary: item.prefix?.trim(),
@@ -148,7 +143,7 @@ export function GeminiSection({
                 <div className={styles.providerCardHeader}>
                   <div className={styles.providerCardLead}>
                     <div className={`${styles.providerMetaLine} ${styles.providerMetaInline}`}>
-                      <span>P</span>
+                      <span>{t('common.priority')}:</span>
                       <span className={styles.providerPriorityBadge}>{item.priority ?? 0}</span>
                     </div>
                     <div className={styles.providerMainTitle}>
@@ -161,7 +156,9 @@ export function GeminiSection({
                     >
                       {identity.title}
                     </div>
-                    {identity.subtitle && <div className={styles.providerKeyGroup}>{identity.subtitle}</div>}
+                    {identity.subtitle && (
+                      <div className={styles.providerKeyGroup}>{identity.subtitle}</div>
+                    )}
                   </div>
                   <div className={styles.providerMetricGrid}>
                     <div className={styles.providerStatusStats}>
@@ -191,7 +188,9 @@ export function GeminiSection({
                         </div>
                       ))}
                       {mappingSummary.hiddenCount > 0 && (
-                        <div className={styles.providerModelMore}>+{mappingSummary.hiddenCount}</div>
+                        <div className={styles.providerModelMore}>
+                          +{mappingSummary.hiddenCount}
+                        </div>
                       )}
                     </div>
                   </div>

@@ -100,7 +100,9 @@ export interface MonitorSourceRef {
   auth_file_name?: string;
 }
 
-export function monitorSourceRefToMeta(sourceRef?: MonitorSourceRef): MonitorSourceMeta | undefined {
+export function monitorSourceRefToMeta(
+  sourceRef?: MonitorSourceRef
+): MonitorSourceMeta | undefined {
   if (!sourceRef?.entity_id) {
     return undefined;
   }
@@ -330,7 +332,10 @@ export function getProviderDisplayParts(
     return { provider: null, masked: formatted };
   }
 
-  const provider = resolveProvider(source, providerMap);
+  // 标准化掩码源：用 maskApiKey 统一格式后再查找 providerMap
+  const normalizedSource = /[.*…]/.test(source) ? maskApiKey(source) : source;
+  const provider =
+    resolveProvider(normalizedSource, providerMap) || resolveProvider(source, providerMap);
   const masked = maskSecret(source);
   return { provider, masked };
 }
@@ -351,6 +356,14 @@ export function resolveMonitorSourceAction(
   const sourceKey = String(source || '').trim();
   if (sourceKey && sourceMetaMap[sourceKey]) {
     return { actionSourceKey: sourceKey, meta: sourceMetaMap[sourceKey] };
+  }
+
+  // 掩码源标准化后重试精确匹配（处理不同星号数的掩码格式）
+  if (sourceKey && /[.*…]/.test(sourceKey)) {
+    const standardized = maskApiKey(sourceKey);
+    if (standardized && standardized !== sourceKey && sourceMetaMap[standardized]) {
+      return { actionSourceKey: standardized, meta: sourceMetaMap[standardized] };
+    }
   }
 
   if (sourceKey && providerMap) {

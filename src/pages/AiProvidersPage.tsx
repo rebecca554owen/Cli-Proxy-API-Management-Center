@@ -59,7 +59,7 @@ export function AiProvidersPage() {
   const disableControls = connectionStatus !== 'connected';
   const isSwitching = Boolean(configSwitchingKey);
 
-  const { keyStats, usageDetails, statusBarBySource, loadKeyStats, refreshKeyStats } = useProviderStats();
+  const { keyStats, statusBarBySource, loadKeyStats, refreshKeyStats } = useProviderStats();
 
   const getErrorMessage = (err: unknown) => {
     if (err instanceof Error) return err.message;
@@ -309,11 +309,7 @@ export function AiProvidersPage() {
     }
 
     const source =
-      provider === 'codex'
-        ? codexConfigs
-        : provider === 'claude'
-          ? claudeConfigs
-          : vertexConfigs;
+      provider === 'codex' ? codexConfigs : provider === 'claude' ? claudeConfigs : vertexConfigs;
 
     if (provider === 'claude') {
       const current = claudeConfigs[index];
@@ -388,8 +384,8 @@ export function AiProvidersPage() {
     const nextList = previousList.map((item, idx) => (idx === index ? nextItem : item));
 
     setVertexConfigs(nextList);
-      updateConfigValue('vertex-api-key', nextList);
-      clearCache('vertex-api-key');
+    updateConfigValue('vertex-api-key', nextList);
+    clearCache('vertex-api-key');
 
     try {
       await persistProviderConfigToggle({
@@ -406,8 +402,8 @@ export function AiProvidersPage() {
     } catch (err: unknown) {
       const message = getErrorMessage(err);
       setVertexConfigs(previousList);
-        updateConfigValue('vertex-api-key', previousList);
-        clearCache('vertex-api-key');
+      updateConfigValue('vertex-api-key', previousList);
+      clearCache('vertex-api-key');
       showNotification(`${t('notification.update_failed')}: ${message}`, 'error');
     } finally {
       setConfigSwitchingKey(null);
@@ -419,7 +415,9 @@ export function AiProvidersPage() {
     const entry = source[index];
     if (!entry) return;
     showConfirmation({
-      title: t(`ai_providers.${type}_delete_title`, { defaultValue: `Delete ${type === 'codex' ? 'Codex' : 'Claude'} Config` }),
+      title: t(`ai_providers.${type}_delete_title`, {
+        defaultValue: `Delete ${type === 'codex' ? 'Codex' : 'Claude'} Config`,
+      }),
       message: t(`ai_providers.${type}_delete_confirm`),
       variant: 'danger',
       confirmText: t('common.confirm'),
@@ -433,15 +431,15 @@ export function AiProvidersPage() {
             clearCache('codex-api-key');
             await refreshMonitorProviderMeta();
             showNotification(t('notification.codex_config_deleted'), 'success');
-        } else {
-          const next = claudeConfigs.filter((_, idx) => idx !== index);
-          await providersApi.saveClaudeConfigs(next);
-          setClaudeConfigs(next);
-          updateConfigValue('claude-api-key', next);
-          clearCache('claude-api-key');
-          await refreshMonitorProviderMeta();
-          showNotification(t('notification.claude_config_deleted'), 'success');
-        }
+          } else {
+            const next = claudeConfigs.filter((_, idx) => idx !== index);
+            await providersApi.saveClaudeConfigs(next);
+            setClaudeConfigs(next);
+            updateConfigValue('claude-api-key', next);
+            clearCache('claude-api-key');
+            await refreshMonitorProviderMeta();
+            showNotification(t('notification.claude_config_deleted'), 'success');
+          }
         } catch (err: unknown) {
           const message = getErrorMessage(err);
           showNotification(`${t('notification.delete_failed')}: ${message}`, 'error');
@@ -510,7 +508,7 @@ export function AiProvidersPage() {
           <GeminiSection
             configs={geminiKeys}
             keyStats={keyStats}
-            usageDetails={usageDetails}
+            statusBarBySource={statusBarBySource}
             loading={loading}
             disableControls={disableControls}
             isSwitching={isSwitching}
@@ -558,7 +556,7 @@ export function AiProvidersPage() {
           <VertexSection
             configs={vertexConfigs}
             keyStats={keyStats}
-            usageDetails={usageDetails}
+            statusBarBySource={statusBarBySource}
             loading={loading}
             disableControls={disableControls}
             isSwitching={isSwitching}
