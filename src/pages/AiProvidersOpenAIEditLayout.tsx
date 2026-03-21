@@ -5,11 +5,16 @@ import { useTranslation } from 'react-i18next';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import { providersApi } from '@/services/api';
 import { useAuthStore, useConfigStore, useNotificationStore, useOpenAIEditDraftStore } from '@/stores';
-import { entriesToModels, modelsToEntries } from '@/components/ui/modelInputListUtils';
+import { modelsToEntries } from '@/components/ui/modelInputListUtils';
 import type { ApiKeyEntry, OpenAIProviderConfig } from '@/types';
 import type { ModelInfo } from '@/utils/models';
-import { buildHeaderObject, headersToEntries, normalizeHeaderEntries } from '@/utils/headers';
-import { buildApiKeyEntry } from '@/components/providers/utils';
+import { headersToEntries, normalizeHeaderEntries } from '@/utils/headers';
+import {
+  buildApiKeyEntry,
+  buildNextProviderList,
+  buildOpenAIProviderFromForm,
+  excludedModelsToText,
+} from '@/components/providers';
 import type { ModelEntry, OpenAIFormState } from '@/components/providers/types';
 import type { KeyTestStatus } from '@/stores/useOpenAIEditDraftStore';
 
@@ -50,6 +55,7 @@ const buildEmptyForm = (): OpenAIFormState => ({
   prefix: '',
   baseUrl: '',
   headers: [],
+  excludedText: '',
   apiKeyEntries: [buildApiKeyEntry()],
   modelEntries: [{ name: '', alias: '' }],
   testModel: undefined,
@@ -61,6 +67,7 @@ const buildCopyForm = (source: OpenAIProviderConfig): OpenAIFormState => ({
   prefix: source.prefix ?? '',
   baseUrl: source.baseUrl,
   headers: headersToEntries(source.headers),
+  excludedText: excludedModelsToText(source.excludedModels),
   apiKeyEntries: source.apiKeyEntries?.length
     ? source.apiKeyEntries.map((entry) => ({
         apiKey: '',
@@ -132,6 +139,7 @@ const buildOpenAISignature = (form: OpenAIFormState, testModel: string) =>
     prefix: String(form.prefix ?? '').trim(),
     baseUrl: String(form.baseUrl ?? '').trim(),
     headers: normalizeHeaderEntries(form.headers),
+    excludedText: String(form.excludedText ?? '').trim(),
     apiKeyEntries: normalizeApiKeyEntries(form.apiKeyEntries),
     models: normalizeModelEntries(form.modelEntries),
     testModel: String(testModel ?? '').trim(),
@@ -315,6 +323,7 @@ export function AiProvidersOpenAIEditLayout() {
         prefix: initialData.prefix ?? '',
         baseUrl: initialData.baseUrl,
         headers: headersToEntries(initialData.headers),
+        excludedText: excludedModelsToText(initialData.excludedModels),
         testModel: initialData.testModel,
         modelEntries,
         apiKeyEntries: initialData.apiKeyEntries?.length
@@ -432,46 +441,23 @@ export function AiProvidersOpenAIEditLayout() {
   });
 
   const handleSave = useCallback(async () => {
-    const name = form.name.trim();
-    const baseUrl = form.baseUrl.trim();
+    const payload = buildOpenAIProviderFromForm(form, testModel);
 
-    if (!name || !baseUrl) {
+    if (!payload.name || !payload.baseUrl) {
       showNotification(t('notification.openai_provider_required'), 'error');
       return;
     }
 
     setSaving(true);
     try {
-      const payload: OpenAIProviderConfig = {
-        name,
-        prefix: form.prefix?.trim() || undefined,
-        baseUrl,
-        headers: buildHeaderObject(form.headers),
-        apiKeyEntries: form.apiKeyEntries.map((entry: ApiKeyEntry) => ({
-          apiKey: entry.apiKey.trim(),
-          proxyUrl: entry.proxyUrl?.trim() || undefined,
-          headers: entry.headers,
-        })),
-      };
-      if (form.priority !== undefined && Number.isFinite(form.priority)) {
-        payload.priority = Math.trunc(form.priority);
-      }
-      const resolvedTestModel = testModel.trim();
-      if (resolvedTestModel) payload.testModel = resolvedTestModel;
-      const models = entriesToModels(form.modelEntries);
-      if (models.length) payload.models = models;
-
       const locationState = location.state as LocationState;
-      const nextList =
-        editIndex !== null
-          ? providers.map((item, idx) => (idx === editIndex ? payload : item))
-          : locationState?.copySource && typeof locationState.copyIndex === 'number'
-            ? [
-                ...providers.slice(0, locationState.copyIndex + 1),
-                payload,
-                ...providers.slice(locationState.copyIndex + 1),
-              ]
-            : [...providers, payload];
+      const nextList = buildNextProviderList(providers, [payload], {
+        indexes: editIndex !== null ? [editIndex] : undefined,
+        copyIndexes:
+          locationState?.copySource && typeof locationState.copyIndex === 'number'
+            ? [locationState.copyIndex]
+            : undefined,
+      });
 
       await providersApi.saveOpenAIProviders(nextList);
 

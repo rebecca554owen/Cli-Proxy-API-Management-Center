@@ -3,15 +3,13 @@ import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { HeaderInputList } from '@/components/ui/HeaderInputList';
-import { ModelInputList } from '@/components/ui/ModelInputList';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack';
 import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell';
 import { useNotificationStore } from '@/stores';
 import {
+  ProviderGroupEditForm,
   hasProviderConnectivityAuth,
   resolveConnectivityErrorMessage,
   runProviderConnectivityTest,
@@ -71,10 +69,7 @@ export function AiProvidersClaudeEditPage() {
 
   const canSave =
     !disableControls && !loading && !saving && !invalidIndexParam && !invalidIndex && !isTesting;
-  const keyList = useMemo(
-    () => (form.apiKeys && form.apiKeys.length ? form.apiKeys : [form.apiKey ?? '']),
-    [form.apiKey, form.apiKeys]
-  );
+  const keyList = useMemo(() => form.keyEntries.map((entry) => entry.apiKey), [form.keyEntries]);
   const duplicateKeyIndexes = useMemo(() => {
     const counts = new Map<string, number>();
     keyList.forEach((value) => {
@@ -92,25 +87,6 @@ export function AiProvidersClaudeEditPage() {
     }, []);
   }, [keyList]);
   const hasDuplicateKeys = duplicateKeyIndexes.length > 0;
-  const resolvedTestApiKey = useMemo(
-    () => keyList.map((value) => value.trim()).find(Boolean) ?? '',
-    [keyList]
-  );
-
-  const modelSelectOptions = useMemo(() => {
-    const seen = new Set<string>();
-    return form.modelEntries.reduce<Array<{ value: string; label: string }>>((acc, entry) => {
-      const name = entry.name.trim();
-      if (!name || seen.has(name)) return acc;
-      seen.add(name);
-      const alias = entry.alias.trim();
-      acc.push({
-        value: name,
-        label: alias && alias !== name ? `${name} (${alias})` : name,
-      });
-      return acc;
-    }, []);
-  }, [form.modelEntries]);
 
   const cloakModeOptions = useMemo(
     () => [
@@ -136,15 +112,18 @@ export function AiProvidersClaudeEditPage() {
     const modelsSignature = form.modelEntries
       .map((entry) => `${entry.name.trim()}:${entry.alias.trim()}`)
       .join('|');
+    const keySignature = form.keyEntries
+      .map((entry) => `${entry.apiKey.trim()}|${entry.proxyUrl.trim()}`)
+      .join('||');
     return [
-      keyList.map((value) => value.trim()).join('|'),
+      keySignature,
       form.baseUrl?.trim() ?? '',
       testModel.trim(),
       headersSignature,
       modelsSignature,
       streamEnabled ? 'stream' : 'non-stream',
     ].join('||');
-  }, [form.baseUrl, form.headers, form.modelEntries, keyList, streamEnabled, testModel]);
+  }, [form.baseUrl, form.headers, form.keyEntries, form.modelEntries, streamEnabled, testModel]);
 
   const previousConnectivityConfigRef = useRef(connectivityConfigSignature);
 
@@ -157,9 +136,104 @@ export function AiProvidersClaudeEditPage() {
     setTestMessage('');
   }, [connectivityConfigSignature, setTestMessage, setTestStatus]);
 
-  const openClaudeModelDiscovery = () => {
+  const openClaudeModelDiscovery = useCallback(() => {
     navigate('models');
-  };
+  }, [navigate]);
+
+  const runSingleKeyTest = useCallback(
+    async (keyIndex: number): Promise<boolean> => {
+      const target = form.keyEntries[keyIndex];
+      const modelName = testModel.trim() || availableModels[0] || '';
+      if (!target) return false;
+      if (!form.baseUrl.trim()) {
+        const message = t('notification.codex_base_url_required');
+        setTestStatus('error');
+        setTestMessage(message);
+        showNotification(message, 'error');
+        return false;
+      }
+      if (!modelName) {
+        const message = t('ai_providers.claude_test_model_required');
+        setTestStatus('error');
+        setTestMessage(message);
+        showNotification(message, 'error');
+        return false;
+      }
+      if (
+        !hasProviderConnectivityAuth('claude', {
+          headers: form.headers,
+          keyHeaders: target.headers,
+          apiKey: target.apiKey,
+        })
+      ) {
+        return false;
+      }
+
+      setForm((prev) => ({
+        ...prev,
+        keyEntries: prev.keyEntries.map((entry, index) =>
+          index === keyIndex ? { ...entry, testStatus: 'loading', testMessage: '' } : entry
+        ),
+      }));
+
+      try {
+        await runProviderConnectivityTest({
+          provider: 'claude',
+          baseUrl: form.baseUrl ?? '',
+          testModel: modelName,
+          headers: form.headers,
+          keyHeaders: target.headers,
+          apiKey: target.apiKey,
+          proxyUrl: target.proxyUrl,
+          stream: streamEnabled,
+        });
+        setForm((prev) => ({
+          ...prev,
+          keyEntries: prev.keyEntries.map((entry, index) =>
+            index === keyIndex ? { ...entry, testStatus: 'success', testMessage: '' } : entry
+          ),
+        }));
+        return true;
+      } catch (err: unknown) {
+        const resolvedMessage = resolveConnectivityErrorMessage('claude', err, t);
+        setForm((prev) => ({
+          ...prev,
+          keyEntries: prev.keyEntries.map((entry, index) =>
+            index === keyIndex
+              ? { ...entry, testStatus: 'error', testMessage: resolvedMessage }
+              : entry
+          ),
+        }));
+        return false;
+      }
+    },
+    [
+      availableModels,
+      form.baseUrl,
+      form.headers,
+      form.keyEntries,
+      setForm,
+      setTestMessage,
+      setTestStatus,
+      showNotification,
+      streamEnabled,
+      t,
+      testModel,
+    ]
+  );
+
+  const testSingleKey = useCallback(
+    async (keyIndex: number): Promise<void> => {
+      if (isTesting) return;
+      setIsTesting(true);
+      try {
+        await runSingleKeyTest(keyIndex);
+      } finally {
+        setIsTesting(false);
+      }
+    },
+    [isTesting, runSingleKeyTest]
+  );
 
   const runClaudeConnectivityTest = useCallback(async () => {
     if (isTesting) return;
@@ -173,12 +247,19 @@ export function AiProvidersClaudeEditPage() {
       return;
     }
 
-    if (
-      !hasProviderConnectivityAuth('claude', {
-        headers: form.headers,
-        apiKey: resolvedTestApiKey,
-      })
-    ) {
+    const validIndexes = form.keyEntries
+      .map((entry, index) =>
+        hasProviderConnectivityAuth('claude', {
+          headers: form.headers,
+          keyHeaders: entry.headers,
+          apiKey: entry.apiKey,
+        })
+          ? index
+          : -1
+      )
+      .filter((index) => index >= 0);
+
+    if (!validIndexes.length) {
       const message = t('ai_providers.claude_test_key_required');
       setTestStatus('error');
       setTestMessage(message);
@@ -189,39 +270,47 @@ export function AiProvidersClaudeEditPage() {
     setIsTesting(true);
     setTestStatus('loading');
     setTestMessage(t('ai_providers.claude_test_running'));
+    setForm((prev) => ({
+      ...prev,
+      keyEntries: prev.keyEntries.map((entry) => ({
+        ...entry,
+        testStatus: hasProviderConnectivityAuth('claude', {
+          headers: prev.headers,
+          keyHeaders: entry.headers,
+          apiKey: entry.apiKey,
+        })
+          ? 'loading'
+          : 'idle',
+        testMessage: '',
+      })),
+    }));
 
     try {
-      await runProviderConnectivityTest({
-        provider: 'claude',
-        baseUrl: form.baseUrl ?? '',
-        testModel: modelName,
-        headers: form.headers,
-        apiKey: resolvedTestApiKey,
-        stream: streamEnabled,
-      });
-
-      const message = t('ai_providers.claude_test_success');
-      setTestStatus('success');
+      const results = await Promise.all(validIndexes.map((index) => runSingleKeyTest(index)));
+      const successCount = results.filter(Boolean).length;
+      const failCount = validIndexes.length - successCount;
+      const message =
+        failCount === 0
+          ? t('ai_providers.claude_test_success')
+          : successCount === 0
+            ? t('ai_providers.openai_test_all_failed', { count: failCount })
+            : t('ai_providers.openai_test_all_partial', { success: successCount, failed: failCount });
+      setTestStatus(failCount === 0 ? 'success' : 'error');
       setTestMessage(message);
-      showNotification(message, 'success');
-    } catch (err: unknown) {
-      const resolvedMessage = resolveConnectivityErrorMessage('claude', err, t);
-      setTestStatus('error');
-      setTestMessage(resolvedMessage);
-      showNotification(resolvedMessage, 'error');
+      showNotification(message, failCount === 0 ? 'success' : successCount === 0 ? 'error' : 'warning');
     } finally {
       setIsTesting(false);
     }
   }, [
     availableModels,
-    form.baseUrl,
     form.headers,
+    form.keyEntries,
     isTesting,
-    resolvedTestApiKey,
+    runSingleKeyTest,
+    setForm,
     setTestMessage,
     setTestStatus,
     showNotification,
-    streamEnabled,
     t,
     testModel,
   ]);
@@ -264,417 +353,161 @@ export function AiProvidersClaudeEditPage() {
         {invalidIndexParam || invalidIndex ? (
           <div className={styles.sectionHint}>{t('common.invalid_provider_index')}</div>
         ) : (
-          <div className={styles.openaiEditForm}>
-            <div className={styles.keyEntriesSection}>
-              <div className={styles.keyEntriesHeader}>
-                <label className={styles.keyEntriesTitle}>
-                  {t('ai_providers.claude_add_modal_key_label')}
-                </label>
-                <span className={styles.keyEntriesHint}>
-                  {t('ai_providers.openai_keys_hint', {
-                    defaultValue: '回车自动新增一行，支持一次粘贴多行密钥。',
-                  })}
-                </span>
-              </div>
-              <div className={styles.keyEntriesList}>
-                <div className={styles.keyEntriesToolbar}>
-                  <span className={styles.keyEntriesCount}>
-                    {t('ai_providers.openai_keys_count', { defaultValue: '密钥数量' })}: {keyList.length}
-                  </span>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() =>
-                      setForm((prev) => ({
-                        ...prev,
-                        apiKeys: [...(prev.apiKeys && prev.apiKeys.length ? prev.apiKeys : ['']), ''],
-                      }))
-                    }
-                    disabled={saving || disableControls || isTesting}
-                    className={styles.addKeyButton}
-                  >
-                    {t('ai_providers.openai_keys_add_btn', { defaultValue: '添加密钥' })}
-                  </Button>
-                </div>
-                {hasDuplicateKeys ? (
-                  <div className="status-badge warning">
-                    {t('ai_providers.claude_duplicate_keys_detected', {
-                      defaultValue: '检测到重复的 Claude API Key，请删除或修改重复项后再保存。',
-                    })}
-                  </div>
-                ) : null}
-                <div className={styles.keyTableShell}>
-                  <div className={styles.keyTableHeader}>
-                    <div className={styles.keyTableColIndex}>#</div>
-                    <div className={styles.keyTableColKey}>{t('common.api_key')}</div>
-                    <div className={styles.keyTableColAction}>{t('common.action')}</div>
-                  </div>
-                  {keyList.map((keyValue, index) => (
-                    <div
-                      key={index}
-                      className={`${styles.keyTableRow} ${
-                        duplicateKeyIndexes.includes(index) ? styles.keyTableRowDuplicate : ''
-                      }`}
-                      style={{ gridTemplateColumns: '46px minmax(320px, 1fr) 120px' }}
-                    >
-                      <div className={styles.keyTableColIndex}>{index + 1}</div>
-                      <div className={styles.keyTableColKey}>
-                        <input
-                          type="text"
-                          value={keyValue}
-                          onChange={(e) =>
-                            setForm((prev) => {
-                              const next = [...(prev.apiKeys && prev.apiKeys.length ? prev.apiKeys : [''])];
-                              next[index] = e.target.value;
-                              return { ...prev, apiKey: index === 0 ? e.target.value : prev.apiKey, apiKeys: next };
-                            })
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key !== 'Enter') return;
-                            e.preventDefault();
-                            setForm((prev) => {
-                              const next = [...(prev.apiKeys && prev.apiKeys.length ? prev.apiKeys : [''])];
-                              next.splice(index + 1, 0, '');
-                              return { ...prev, apiKeys: next };
-                            });
-                          }}
-                          onPaste={(e) => {
-                            const pasted = e.clipboardData.getData('text');
-                            if (!/[\r\n]+/.test(pasted)) return;
-                            e.preventDefault();
-                            const values = pasted
-                              .split(/\r?\n+/)
-                              .map((value) => value.trim())
-                              .filter(Boolean);
-                            if (!values.length) return;
-                            setForm((prev) => {
-                              const next = [...(prev.apiKeys && prev.apiKeys.length ? prev.apiKeys : [''])];
-                              next.splice(index, 1, ...values);
-                              return { ...prev, apiKey: next[0] ?? '', apiKeys: next };
-                            });
-                          }}
-                          disabled={saving || disableControls || isTesting}
-                          className={`input ${styles.keyTableInput} ${
-                            duplicateKeyIndexes.includes(index) ? styles.keyTableInputDuplicate : ''
-                          }`}
-                          placeholder={t('ai_providers.claude_add_modal_key_placeholder')}
-                        />
-                      </div>
-                      <div className={styles.keyTableColAction}>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() =>
-                            setForm((prev) => {
-                              const current = prev.apiKeys && prev.apiKeys.length ? prev.apiKeys : [''];
-                              const next = current.filter((_, currentIndex) => currentIndex !== index);
-                              const normalized = next.length ? next : [''];
-                              return { ...prev, apiKey: normalized[0] ?? '', apiKeys: normalized };
-                            })
-                          }
-                          disabled={saving || disableControls || isTesting || keyList.length <= 1}
-                        >
-                          {t('common.delete')}
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <Input
-              label={t('ai_providers.priority_label')}
-              hint={t('ai_providers.priority_hint')}
-              type="number"
-              step={1}
-              value={form.priority ?? ''}
-              onChange={(e) => {
-                const raw = e.target.value;
-                const parsed = raw.trim() === '' ? undefined : Number(raw);
-                setForm((prev) => ({
-                  ...prev,
-                  priority: parsed !== undefined && Number.isFinite(parsed) ? parsed : undefined,
-                }));
-              }}
-              disabled={saving || disableControls || isTesting}
-            />
-            <Input
-              label={t('ai_providers.prefix_label')}
-              placeholder={t('ai_providers.prefix_placeholder')}
-              value={form.prefix ?? ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, prefix: e.target.value }))}
-              hint={t('ai_providers.prefix_hint')}
-              disabled={saving || disableControls || isTesting}
-            />
-            <Input
-              label={t('ai_providers.claude_add_modal_url_label')}
-              value={form.baseUrl ?? ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))}
-              disabled={saving || disableControls || isTesting}
-            />
-            <Input
-              label={t('ai_providers.claude_add_modal_proxy_label')}
-              value={form.proxyUrl ?? ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, proxyUrl: e.target.value }))}
-              disabled={saving || disableControls || isTesting}
-            />
-            <HeaderInputList
-              entries={form.headers}
-              onChange={(entries) => setForm((prev) => ({ ...prev, headers: entries }))}
-              addLabel={t('common.custom_headers_add')}
-              keyPlaceholder={t('common.custom_headers_key_placeholder')}
-              valuePlaceholder={t('common.custom_headers_value_placeholder')}
-              removeButtonTitle={t('common.delete')}
-              removeButtonAriaLabel={t('common.delete')}
-              disabled={saving || disableControls || isTesting}
-            />
-
-            <div className={styles.modelConfigSection}>
-              <div className={styles.modelConfigHeader}>
-                <label className={styles.modelConfigTitle}>{t('ai_providers.claude_models_label')}</label>
-                <div className={styles.modelConfigToolbar}>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() =>
-                      setForm((prev) => ({
-                        ...prev,
-                        modelEntries: [...prev.modelEntries, { name: '', alias: '' }],
-                      }))
-                    }
-                    disabled={saving || disableControls || isTesting}
-                  >
-                    {t('ai_providers.claude_models_add_btn')}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={openClaudeModelDiscovery}
-                    disabled={saving || disableControls || isTesting}
-                  >
-                    {t('ai_providers.claude_models_fetch_button')}
-                  </Button>
-                </div>
-              </div>
-
-              <div className={styles.sectionHint}>{t('ai_providers.claude_models_hint')}</div>
-
-              <ModelInputList
-                entries={form.modelEntries}
-                onChange={(entries) => setForm((prev) => ({ ...prev, modelEntries: entries }))}
-                namePlaceholder={t('common.model_name_placeholder')}
-                aliasPlaceholder={t('common.model_alias_placeholder')}
-                aliasFirst
-                disabled={saving || disableControls || isTesting}
-                hideAddButton
-                className={styles.modelInputList}
-                rowClassName={styles.modelInputRow}
-                inputClassName={styles.modelInputField}
-                removeButtonClassName={styles.modelRowRemoveButton}
-                removeButtonTitle={t('common.delete')}
-                removeButtonAriaLabel={t('common.delete')}
-              />
-
-              <div className={styles.modelTestPanel}>
-                <div className={styles.modelTestMeta}>
-                  <label className={styles.modelTestLabel}>{t('ai_providers.claude_test_title')}</label>
-                  <span className={styles.modelTestHint}>{t('ai_providers.claude_test_hint')}</span>
-                  <div className={styles.modelTestHint}>
-                    <label>{t('common.stream')}</label>
-                    <ToggleSwitch
-                      checked={streamEnabled}
-                      onChange={(value) => {
-                        setStreamEnabled(value);
-                        setTestStatus('idle');
-                        setTestMessage('');
-                      }}
-                      disabled={saving || disableControls || isTesting}
-                      ariaLabel={t('common.stream')}
-                    />
-                  </div>
-                </div>
-                <div className={styles.modelTestControls}>
-                  <Select
-                    value={testModel}
-                    options={modelSelectOptions}
-                    onChange={(value) => {
-                      setTestModel(value);
-                      setTestStatus('idle');
-                      setTestMessage('');
-                    }}
-                    placeholder={
-                      availableModels.length
-                        ? t('ai_providers.claude_test_select_placeholder')
-                        : t('ai_providers.claude_test_select_empty')
-                    }
-                    className={styles.openaiTestSelect}
-                    ariaLabel={t('ai_providers.claude_test_title')}
-                    disabled={
-                      saving ||
-                      disableControls ||
-                      isTesting ||
-                      testStatus === 'loading' ||
-                      availableModels.length === 0
-                    }
-                  />
-                  <div className={styles.modelTestPanelActions}>
-                    <Button
-                      variant={testStatus === 'error' ? 'danger' : 'secondary'}
-                      size="sm"
-                      onClick={() => void runClaudeConnectivityTest()}
-                      loading={testStatus === 'loading'}
-                      disabled={
-                        saving ||
-                        disableControls ||
-                        isTesting ||
-                        testStatus === 'loading' ||
-                        availableModels.length === 0
-                      }
-                      className={`${styles.modelTestAllButton} ${
-                        testStatus === 'error' ? styles.modelTestDangerButton : styles.modelTestSecondaryButton
-                      }`}
-                    >
-                      {t('ai_providers.claude_test_action')}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              {testMessage && (
-                <div
-                  className={styles.modelTestMessage}
-                >
-                  <div
-                    className={`status-badge ${
-                      testStatus === 'error'
-                        ? 'error'
-                        : testStatus === 'success'
-                          ? 'success'
-                          : 'muted'
-                    }`}
-                  >
-                    {testMessage}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="form-group">
-              <label>{t('ai_providers.excluded_models_label')}</label>
-              <textarea
-                className="input"
-                placeholder={t('ai_providers.excluded_models_placeholder')}
-                value={form.excludedText}
-                onChange={(e) => setForm((prev) => ({ ...prev, excludedText: e.target.value }))}
-                rows={4}
-                disabled={saving || disableControls || isTesting}
-              />
-              <div className="hint">{t('ai_providers.excluded_models_hint')}</div>
-            </div>
-
-            <div className={styles.modelConfigSection}>
-              <div className={styles.modelConfigHeader}>
-                <label className={styles.modelConfigTitle}>{t('ai_providers.claude_cloak_title')}</label>
-                <div className={styles.modelConfigToolbar}>
-                  <ToggleSwitch
-                    checked={Boolean(form.cloak)}
-                    onChange={(enabled) =>
-                      setForm((prev) => {
-                        if (!enabled) {
-                          if (prev.cloak) {
-                            lastCloakConfigRef.current = prev.cloak;
-                          }
-                          return { ...prev, cloak: undefined };
-                        }
-
-                        const restored = prev.cloak
-                          ?? lastCloakConfigRef.current
-                          ?? { mode: 'auto', strictMode: false, sensitiveWords: [] };
-                        const mode = String(restored.mode ?? 'auto').trim() || 'auto';
-                        return {
-                          ...prev,
-                          cloak: {
-                            mode,
-                            strictMode: restored.strictMode ?? false,
-                            sensitiveWords: restored.sensitiveWords ?? [],
-                          },
-                        };
+          <ProviderGroupEditForm
+            provider="claude"
+            form={{
+              ...form,
+              keyEntries: form.keyEntries.map((entry, index) => ({
+                ...entry,
+                testStatus: duplicateKeyIndexes.includes(index) ? 'error' : entry.testStatus,
+                testMessage:
+                  duplicateKeyIndexes.includes(index)
+                    ? t('ai_providers.claude_duplicate_keys_detected', {
+                        defaultValue: '检测到重复的 Claude API Key，请删除或修改重复项后再保存。',
                       })
-                    }
-                    disabled={saving || disableControls || isTesting}
-                    ariaLabel={t('ai_providers.claude_cloak_toggle_aria')}
-                    label={t('ai_providers.claude_cloak_toggle_label')}
-                  />
+                    : entry.testMessage,
+              })),
+            }}
+            setForm={(action) => {
+              setForm(action);
+              setTestModel((prev) => {
+                const next = typeof action === 'function' ? action(form) : action;
+                return next.testModel ?? prev;
+              });
+              setTestStatus('idle');
+              setTestMessage('');
+            }}
+            disabled={saving || disableControls}
+            testing={isTesting}
+            summaryStatus={testStatus}
+            summaryMessage={testMessage}
+            onTestAll={runClaudeConnectivityTest}
+            onTestOne={testSingleKey}
+            onOpenModelDiscovery={openClaudeModelDiscovery}
+            streamEnabled={streamEnabled}
+            onToggleStreamEnabled={(value) => {
+              setStreamEnabled(value);
+              setTestStatus('idle');
+              setTestMessage('');
+            }}
+            singleEntryMode
+            testAllLabelKey="ai_providers.claude_test_action"
+            testAllLabelDefault="测试"
+            keyEntryHighlightIndexes={duplicateKeyIndexes}
+            renderBeforeKeyEntries={
+              hasDuplicateKeys ? (
+                <div className="status-badge warning">
+                  {t('ai_providers.claude_duplicate_keys_detected', {
+                    defaultValue: '检测到重复的 Claude API Key，请删除或修改重复项后再保存。',
+                  })}
                 </div>
-              </div>
-              <div className={styles.sectionHint}>{t('ai_providers.claude_cloak_hint')}</div>
-
-              {form.cloak ? (
-                <>
-                  <div className="form-group">
-                    <label>{t('ai_providers.claude_cloak_mode_label')}</label>
-                    <Select
-                      value={resolvedCloakMode}
-                      options={cloakModeOptions}
-                      onChange={(value) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          cloak: {
-                            ...(prev.cloak ?? {}),
-                            mode: value,
-                          },
-                        }))
-                      }
-                      ariaLabel={t('ai_providers.claude_cloak_mode_label')}
-                      disabled={saving || disableControls || isTesting}
-                    />
-                    <div className="hint">{t('ai_providers.claude_cloak_mode_hint')}</div>
-                  </div>
-
-                  <div className="form-group">
-                    <label>{t('ai_providers.claude_cloak_strict_label')}</label>
+              ) : null
+            }
+            renderAfterModels={
+              <div className={styles.modelConfigSection}>
+                <div className={styles.modelConfigHeader}>
+                  <label className={styles.modelConfigTitle}>{t('ai_providers.claude_cloak_title')}</label>
+                  <div className={styles.modelConfigToolbar}>
                     <ToggleSwitch
-                      checked={Boolean(form.cloak.strictMode)}
-                      onChange={(value) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          cloak: {
-                            ...(prev.cloak ?? {}),
-                            strictMode: value,
-                          },
-                        }))
+                      checked={Boolean(form.cloak)}
+                      onChange={(enabled) =>
+                        setForm((prev) => {
+                          if (!enabled) {
+                            if (prev.cloak) {
+                              lastCloakConfigRef.current = prev.cloak;
+                            }
+                            return { ...prev, cloak: undefined };
+                          }
+
+                          const restored = prev.cloak
+                            ?? lastCloakConfigRef.current
+                            ?? { mode: 'auto', strictMode: false, sensitiveWords: [] };
+                          const mode = String(restored.mode ?? 'auto').trim() || 'auto';
+                          return {
+                            ...prev,
+                            cloak: {
+                              mode,
+                              strictMode: restored.strictMode ?? false,
+                              sensitiveWords: restored.sensitiveWords ?? [],
+                            },
+                          };
+                        })
                       }
                       disabled={saving || disableControls || isTesting}
-                      ariaLabel={t('ai_providers.claude_cloak_strict_label')}
+                      ariaLabel={t('ai_providers.claude_cloak_toggle_aria')}
+                      label={t('ai_providers.claude_cloak_toggle_label')}
                     />
-                    <div className="hint">{t('ai_providers.claude_cloak_strict_hint')}</div>
                   </div>
+                </div>
+                <div className={styles.sectionHint}>{t('ai_providers.claude_cloak_hint')}</div>
 
-                  <div className="form-group">
-                    <label>{t('ai_providers.claude_cloak_sensitive_words_label')}</label>
-                    <textarea
-                      className="input"
-                      placeholder={t('ai_providers.claude_cloak_sensitive_words_placeholder')}
-                      value={(form.cloak.sensitiveWords ?? []).join('\n')}
-                      onChange={(e) => {
-                        const nextWords = parseTextList(e.target.value);
-                        setForm((prev) => ({
-                          ...prev,
-                          cloak: {
-                            ...(prev.cloak ?? {}),
-                            sensitiveWords: nextWords.length ? nextWords : undefined,
-                          },
-                        }));
-                      }}
-                      rows={3}
-                      disabled={saving || disableControls || isTesting}
-                    />
-                    <div className="hint">{t('ai_providers.claude_cloak_sensitive_words_hint')}</div>
-                  </div>
-                </>
-              ) : null}
-            </div>
-          </div>
+                {form.cloak ? (
+                  <>
+                    <div className="form-group">
+                      <label>{t('ai_providers.claude_cloak_mode_label')}</label>
+                      <Select
+                        value={resolvedCloakMode}
+                        options={cloakModeOptions}
+                        onChange={(value) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            cloak: {
+                              ...(prev.cloak ?? {}),
+                              mode: value,
+                            },
+                          }))
+                        }
+                        ariaLabel={t('ai_providers.claude_cloak_mode_label')}
+                        disabled={saving || disableControls || isTesting}
+                      />
+                      <div className="hint">{t('ai_providers.claude_cloak_mode_hint')}</div>
+                    </div>
+
+                    <div className="form-group">
+                      <label>{t('ai_providers.claude_cloak_strict_label')}</label>
+                      <ToggleSwitch
+                        checked={Boolean(form.cloak.strictMode)}
+                        onChange={(value) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            cloak: {
+                              ...(prev.cloak ?? {}),
+                              strictMode: value,
+                            },
+                          }))
+                        }
+                        disabled={saving || disableControls || isTesting}
+                        ariaLabel={t('ai_providers.claude_cloak_strict_label')}
+                      />
+                      <div className="hint">{t('ai_providers.claude_cloak_strict_hint')}</div>
+                    </div>
+
+                    <div className="form-group">
+                      <label>{t('ai_providers.claude_cloak_sensitive_words_label')}</label>
+                      <textarea
+                        className="input"
+                        placeholder={t('ai_providers.claude_cloak_sensitive_words_placeholder')}
+                        value={(form.cloak.sensitiveWords ?? []).join('\n')}
+                        onChange={(e) => {
+                          const nextWords = parseTextList(e.target.value);
+                          setForm((prev) => ({
+                            ...prev,
+                            cloak: {
+                              ...(prev.cloak ?? {}),
+                              sensitiveWords: nextWords.length ? nextWords : undefined,
+                            },
+                          }));
+                        }}
+                        rows={3}
+                        disabled={saving || disableControls || isTesting}
+                      />
+                      <div className="hint">{t('ai_providers.claude_cloak_sensitive_words_hint')}</div>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            }
+          />
         )}
       </Card>
     </SecondaryScreenShell>

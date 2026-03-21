@@ -150,17 +150,14 @@ export function AiProvidersPage() {
 
   const duplicateClaudeConfig = useCallback(
     (index: number) => {
-      const entry = claudeConfigs[index];
-      if (!entry) return;
       navigate('/ai-providers/claude/new', {
         state: {
           fromAiProviders: true,
-          copySource: entry,
           copyIndex: index,
         },
       });
     },
-    [claudeConfigs, navigate]
+    [navigate]
   );
 
   const duplicateGeminiConfig = useCallback(
@@ -180,17 +177,14 @@ export function AiProvidersPage() {
 
   const duplicateCodexConfig = useCallback(
     (index: number) => {
-      const entry = codexConfigs[index];
-      if (!entry) return;
       navigate('/ai-providers/codex/new', {
         state: {
           fromAiProviders: true,
-          copySource: entry,
           copyIndex: index,
         },
       });
     },
-    [codexConfigs, navigate]
+    [navigate]
   );
 
   const duplicateOpenAIProvider = useCallback(
@@ -321,6 +315,68 @@ export function AiProvidersPage() {
           ? claudeConfigs
           : vertexConfigs;
 
+    if (provider === 'claude') {
+      const current = claudeConfigs[index];
+      if (!current) return;
+      const switchingKey = `${provider}:${current.apiKey}`;
+      setConfigSwitchingKey(switchingKey);
+      const previousList = claudeConfigs;
+      const nextItem = setProviderEntryEnabled(current, enabled);
+      const nextList = previousList.map((item, idx) => (idx === index ? nextItem : item));
+
+      setClaudeConfigs(nextList);
+      updateConfigValue('claude-api-key', nextList);
+      clearCache('claude-api-key');
+
+      try {
+        await providersApi.saveClaudeConfigs(nextList);
+        showNotification(
+          enabled ? t('notification.config_enabled') : t('notification.config_disabled'),
+          'success'
+        );
+      } catch (err: unknown) {
+        const message = getErrorMessage(err);
+        setClaudeConfigs(previousList);
+        updateConfigValue('claude-api-key', previousList);
+        clearCache('claude-api-key');
+        showNotification(`${t('notification.update_failed')}: ${message}`, 'error');
+      } finally {
+        setConfigSwitchingKey(null);
+      }
+      return;
+    }
+
+    if (provider === 'codex') {
+      const current = codexConfigs[index];
+      if (!current) return;
+      const switchingKey = `${provider}:${current.apiKey}`;
+      setConfigSwitchingKey(switchingKey);
+      const previousList = codexConfigs;
+      const nextItem = setProviderEntryEnabled(current, enabled);
+      const nextList = previousList.map((item, idx) => (idx === index ? nextItem : item));
+
+      setCodexConfigs(nextList);
+      updateConfigValue('codex-api-key', nextList);
+      clearCache('codex-api-key');
+
+      try {
+        await providersApi.saveCodexConfigs(nextList);
+        showNotification(
+          enabled ? t('notification.config_enabled') : t('notification.config_disabled'),
+          'success'
+        );
+      } catch (err: unknown) {
+        const message = getErrorMessage(err);
+        setCodexConfigs(previousList);
+        updateConfigValue('codex-api-key', previousList);
+        clearCache('codex-api-key');
+        showNotification(`${t('notification.update_failed')}: ${message}`, 'error');
+      } finally {
+        setConfigSwitchingKey(null);
+      }
+      return;
+    }
+
     const current = source[index];
     if (!current) return;
 
@@ -331,37 +387,17 @@ export function AiProvidersPage() {
     const nextItem = setProviderEntryEnabled(current, enabled);
     const nextList = previousList.map((item, idx) => (idx === index ? nextItem : item));
 
-    if (provider === 'codex') {
-      setCodexConfigs(nextList);
-      updateConfigValue('codex-api-key', nextList);
-      clearCache('codex-api-key');
-    } else if (provider === 'claude') {
-      setClaudeConfigs(nextList);
-      updateConfigValue('claude-api-key', nextList);
-      clearCache('claude-api-key');
-    } else {
-      setVertexConfigs(nextList);
+    setVertexConfigs(nextList);
       updateConfigValue('vertex-api-key', nextList);
       clearCache('vertex-api-key');
-    }
 
     try {
       await persistProviderConfigToggle({
         list: previousList,
         index,
         enabled,
-        save:
-          provider === 'codex'
-            ? providersApi.saveCodexConfigs
-            : provider === 'claude'
-              ? providersApi.saveClaudeConfigs
-              : providersApi.saveVertexConfigs,
-        section:
-          provider === 'codex'
-            ? 'codex-api-key'
-            : provider === 'claude'
-              ? 'claude-api-key'
-              : 'vertex-api-key',
+        save: providersApi.saveVertexConfigs,
+        section: 'vertex-api-key',
       });
       showNotification(
         enabled ? t('notification.config_enabled') : t('notification.config_disabled'),
@@ -369,19 +405,9 @@ export function AiProvidersPage() {
       );
     } catch (err: unknown) {
       const message = getErrorMessage(err);
-      if (provider === 'codex') {
-        setCodexConfigs(previousList);
-        updateConfigValue('codex-api-key', previousList);
-        clearCache('codex-api-key');
-      } else if (provider === 'claude') {
-        setClaudeConfigs(previousList);
-        updateConfigValue('claude-api-key', previousList);
-        clearCache('claude-api-key');
-      } else {
-        setVertexConfigs(previousList);
+      setVertexConfigs(previousList);
         updateConfigValue('vertex-api-key', previousList);
         clearCache('vertex-api-key');
-      }
       showNotification(`${t('notification.update_failed')}: ${message}`, 'error');
     } finally {
       setConfigSwitchingKey(null);
@@ -400,16 +426,16 @@ export function AiProvidersPage() {
       onConfirm: async () => {
         try {
           if (type === 'codex') {
-            await providersApi.deleteCodexConfig(entry.apiKey);
-          const next = codexConfigs.filter((_, idx) => idx !== index);
-          setCodexConfigs(next);
-          updateConfigValue('codex-api-key', next);
-          clearCache('codex-api-key');
-          await refreshMonitorProviderMeta();
-          showNotification(t('notification.codex_config_deleted'), 'success');
+            const next = codexConfigs.filter((_, idx) => idx !== index);
+            await providersApi.saveCodexConfigs(next);
+            setCodexConfigs(next);
+            updateConfigValue('codex-api-key', next);
+            clearCache('codex-api-key');
+            await refreshMonitorProviderMeta();
+            showNotification(t('notification.codex_config_deleted'), 'success');
         } else {
-          await providersApi.deleteClaudeConfig(entry.apiKey);
           const next = claudeConfigs.filter((_, idx) => idx !== index);
+          await providersApi.saveClaudeConfigs(next);
           setClaudeConfigs(next);
           updateConfigValue('claude-api-key', next);
           clearCache('claude-api-key');
@@ -557,7 +583,7 @@ export function AiProvidersPage() {
           <OpenAISection
             configs={openaiProviders}
             keyStats={keyStats}
-            usageDetails={usageDetails}
+            statusBarBySource={statusBarBySource}
             loading={loading}
             disableControls={disableControls}
             isSwitching={isSwitching}

@@ -3,92 +3,21 @@ import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { HeaderInputList } from '@/components/ui/HeaderInputList';
-import { Input } from '@/components/ui/Input';
-import { ModelInputList } from '@/components/ui/ModelInputList';
-import { Select } from '@/components/ui/Select';
-import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell';
 import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack';
 import { useNotificationStore } from '@/stores';
-import type { ApiKeyEntry } from '@/types';
-import { copyToClipboard } from '@/utils/clipboard';
 import {
-  buildApiKeyEntry,
+  ProviderGroupEditForm,
+  buildLegacyOpenAIFormState,
   hasProviderConnectivityAuth,
   resolveConnectivityErrorMessage,
   runProviderConnectivityTest,
 } from '@/components/providers';
+import type { ProviderGroupFormState } from '@/components/providers';
+import { headersToEntries } from '@/utils/headers';
 import type { OpenAIEditOutletContext } from './AiProvidersOpenAIEditLayout';
-import type { KeyTestStatus } from '@/stores/useOpenAIEditDraftStore';
 import styles from './AiProvidersPage.module.scss';
 import layoutStyles from './AiProvidersEditLayout.module.scss';
-
-// Status icon components
-function StatusLoadingIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className={styles.statusIconSpin}>
-      <circle cx="8" cy="8" r="7" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2" />
-      <path
-        d="M8 1A7 7 0 0 1 8 15"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function StatusSuccessIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-      <circle cx="8" cy="8" r="8" fill="var(--success-color, #22c55e)" />
-      <path
-        d="M4.5 8L7 10.5L11.5 6"
-        stroke="white"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function StatusErrorIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-      <circle cx="8" cy="8" r="8" fill="var(--danger-color, #ef4444)" />
-      <path
-        d="M5 5L11 11M11 5L5 11"
-        stroke="white"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function StatusIdleIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-      <circle cx="8" cy="8" r="7" stroke="var(--text-tertiary, #9ca3af)" strokeWidth="2" />
-    </svg>
-  );
-}
-
-function StatusIcon({ status }: { status: KeyTestStatus['status'] }) {
-  switch (status) {
-    case 'loading':
-      return <StatusLoadingIcon />;
-    case 'success':
-      return <StatusSuccessIcon />;
-    case 'error':
-      return <StatusErrorIcon />;
-    default:
-      return <StatusIdleIcon />;
-  }
-}
 
 export function AiProvidersOpenAIEditPage() {
   const { t } = useTranslation();
@@ -136,28 +65,7 @@ export function AiProvidersOpenAIEditPage() {
   }, [handleBack]);
 
   const canSave = !disableControls && !loading && !saving && !invalidIndexParam && !invalidIndex && !isTestingKeys;
-  const hasConfiguredModels = form.modelEntries.some((entry) => entry.name.trim());
-  const hasTestableKeys = form.apiKeyEntries.some((entry) =>
-    hasProviderConnectivityAuth('openai', {
-      headers: form.headers,
-      keyHeaders: entry.headers,
-      apiKey: entry.apiKey,
-    })
-  );
-  const modelSelectOptions = useMemo(() => {
-    const seen = new Set<string>();
-    return form.modelEntries.reduce<Array<{ value: string; label: string }>>((acc, entry) => {
-      const name = entry.name.trim();
-      if (!name || seen.has(name)) return acc;
-      seen.add(name);
-      const alias = entry.alias.trim();
-      acc.push({
-        value: name,
-        label: alias && alias !== name ? `${name} (${alias})` : name,
-      });
-      return acc;
-    }, []);
-  }, [form.modelEntries]);
+
   const connectivityConfigSignature = useMemo(() => {
     const headersSignature = form.headers
       .map((entry) => `${entry.key.trim()}:${entry.value.trim()}`)
@@ -191,7 +99,6 @@ export function AiProvidersOpenAIEditPage() {
     setTestMessage,
   ]);
 
-  // Test a single key by index
   const runSingleKeyTest = useCallback(
     async (keyIndex: number): Promise<boolean> => {
       const baseUrl = form.baseUrl.trim();
@@ -254,11 +161,11 @@ export function AiProvidersOpenAIEditPage() {
   );
 
   const testSingleKey = useCallback(
-    async (keyIndex: number): Promise<boolean> => {
-      if (isTestingKeys) return false;
+    async (keyIndex: number): Promise<void> => {
+      if (isTestingKeys) return;
       setIsTestingKeys(true);
       try {
-        return await runSingleKeyTest(keyIndex);
+        await runSingleKeyTest(keyIndex);
       } finally {
         setIsTestingKeys(false);
       }
@@ -266,7 +173,6 @@ export function AiProvidersOpenAIEditPage() {
     [isTestingKeys, runSingleKeyTest]
   );
 
-  // Test all keys
   const testAllKeys = useCallback(async () => {
     if (isTestingKeys) return;
 
@@ -341,6 +247,7 @@ export function AiProvidersOpenAIEditPage() {
     isTestingKeys,
     form.baseUrl,
     form.apiKeyEntries,
+    form.headers,
     testModel,
     availableModels,
     t,
@@ -351,165 +258,48 @@ export function AiProvidersOpenAIEditPage() {
     showNotification,
   ]);
 
-  const openOpenaiModelDiscovery = () => {
+  const openOpenaiModelDiscovery = useCallback(() => {
     const baseUrl = form.baseUrl.trim();
     if (!baseUrl) {
       showNotification(t('ai_providers.openai_models_fetch_invalid_url'), 'error');
       return;
     }
     navigate('models');
-  };
+  }, [form.baseUrl, navigate, showNotification, t]);
 
-  const copyApiKey = useCallback(
-    async (value: string) => {
-      const copied = await copyToClipboard(value);
-      showNotification(t(copied ? 'notification.link_copied' : 'notification.copy_failed'), copied ? 'success' : 'error');
+  const sharedForm = useMemo<ProviderGroupFormState>(() => ({
+    name: form.name,
+    priority: form.priority,
+    prefix: form.prefix ?? '',
+    baseUrl: form.baseUrl,
+    headers: form.headers,
+    excludedText: form.excludedText,
+    testModel,
+    modelEntries: form.modelEntries,
+    keyEntries: (form.apiKeyEntries.length
+      ? form.apiKeyEntries
+      : [{ apiKey: '', proxyUrl: '', headers: undefined }]
+    ).map((entry, index) => ({
+      apiKey: String(entry.apiKey ?? ''),
+      proxyUrl: String(entry.proxyUrl ?? ''),
+      headers: headersToEntries(entry.headers),
+      testStatus: keyTestStatuses[index]?.status ?? 'idle',
+      testMessage: keyTestStatuses[index]?.message ?? '',
+    })),
+  }), [form, keyTestStatuses, testModel]);
+
+  const setSharedForm = useCallback(
+    (action: (prev: ProviderGroupFormState) => ProviderGroupFormState) => {
+      const nextSharedForm = action(sharedForm);
+      const nextForm = buildLegacyOpenAIFormState(nextSharedForm);
+      setForm(nextForm);
+      setTestModel(nextSharedForm.testModel);
+      resetDraftKeyTestStatuses(nextSharedForm.keyEntries.length);
+      setTestStatus('idle');
+      setTestMessage('');
     },
-    [showNotification, t]
+    [resetDraftKeyTestStatuses, setForm, setTestMessage, setTestModel, setTestStatus, sharedForm]
   );
-
-  const renderKeyEntries = (entries: ApiKeyEntry[]) => {
-    const list = entries.length ? entries : [buildApiKeyEntry()];
-
-    const updateEntry = (idx: number, field: keyof ApiKeyEntry, value: string) => {
-      const next = list.map((entry, i) => (i === idx ? { ...entry, [field]: value } : entry));
-      setForm((prev) => ({ ...prev, apiKeyEntries: next }));
-      setDraftKeyTestStatus(idx, { status: 'idle', message: '' });
-      setTestStatus('idle');
-      setTestMessage('');
-    };
-
-    const removeEntry = (idx: number) => {
-      const next = list.filter((_, i) => i !== idx);
-      const nextLength = next.length ? next.length : 1;
-      setForm((prev) => ({
-        ...prev,
-        apiKeyEntries: next.length ? next : [buildApiKeyEntry()],
-      }));
-      resetDraftKeyTestStatuses(nextLength);
-      setTestStatus('idle');
-      setTestMessage('');
-    };
-
-    const addEntry = () => {
-      setForm((prev) => ({ ...prev, apiKeyEntries: [...list, buildApiKeyEntry()] }));
-      resetDraftKeyTestStatuses(list.length + 1);
-      setTestStatus('idle');
-      setTestMessage('');
-    };
-
-    return (
-      <div className={styles.keyEntriesList}>
-        <div className={styles.keyEntriesToolbar}>
-          <span className={styles.keyEntriesCount}>
-            {t('ai_providers.openai_keys_count')}: {list.length}
-          </span>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={addEntry}
-            disabled={saving || disableControls || isTestingKeys}
-            className={styles.addKeyButton}
-          >
-            {t('ai_providers.openai_keys_add_btn')}
-          </Button>
-        </div>
-        <div className={styles.keyTableShell}>
-          {/* 表头 */}
-          <div className={styles.keyTableHeader}>
-            <div className={styles.keyTableColIndex}>#</div>
-            <div className={styles.keyTableColStatus}>{t('common.status')}</div>
-            <div className={styles.keyTableColKey}>{t('common.api_key')}</div>
-            <div className={styles.keyTableColProxy}>{t('common.proxy_url')}</div>
-            <div className={styles.keyTableColAction}>{t('common.action')}</div>
-          </div>
-
-          {/* 数据行 */}
-          {list.map((entry, index) => {
-            const keyStatus = keyTestStatuses[index]?.status ?? 'idle';
-            const canTestKey =
-              hasConfiguredModels &&
-              hasProviderConnectivityAuth('openai', {
-                headers: form.headers,
-                keyHeaders: entry.headers,
-                apiKey: entry.apiKey,
-              });
-
-            return (
-              <div key={index} className={styles.keyTableRow}>
-                {/* 序号 */}
-                <div className={styles.keyTableColIndex}>{index + 1}</div>
-
-                {/* 状态指示灯 */}
-                <div
-                  className={styles.keyTableColStatus}
-                  title={keyTestStatuses[index]?.message || ''}
-                >
-                  <StatusIcon status={keyStatus} />
-                </div>
-
-                {/* Key 输入框 */}
-                <div className={styles.keyTableColKey}>
-                  <input
-                    type="text"
-                    value={entry.apiKey}
-                    onChange={(e) => updateEntry(index, 'apiKey', e.target.value)}
-                    disabled={saving || disableControls || isTestingKeys}
-                    className={`input ${styles.keyTableInput}`}
-                    placeholder={t('ai_providers.openai_key_placeholder')}
-                  />
-                </div>
-
-                {/* Proxy 输入框 */}
-                <div className={styles.keyTableColProxy}>
-                  <input
-                    type="text"
-                    value={entry.proxyUrl ?? ''}
-                    onChange={(e) => updateEntry(index, 'proxyUrl', e.target.value)}
-                    disabled={saving || disableControls || isTestingKeys}
-                    className={`input ${styles.keyTableInput}`}
-                    placeholder={t('ai_providers.openai_proxy_placeholder')}
-                  />
-                </div>
-
-                {/* 操作按钮 */}
-                <div className={styles.keyTableColAction}>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => void copyApiKey(entry.apiKey)}
-                    disabled={saving || disableControls || isTestingKeys || !entry.apiKey?.trim()}
-                    className={styles.providerActionButtonCompact}
-                  >
-                    {t('common.copy')}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => void testSingleKey(index)}
-                    disabled={saving || disableControls || isTestingKeys || !canTestKey}
-                    loading={keyStatus === 'loading'}
-                    className={`${styles.modelTestSecondaryButton} ${styles.providerActionButtonCompact}`}
-                  >
-                    {t('ai_providers.openai_test_single_action')}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeEntry(index)}
-                    disabled={saving || disableControls || isTestingKeys || list.length <= 1}
-                    className={styles.providerActionButtonCompact}
-                  >
-                    {t('common.delete')}
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
 
   return (
     <SecondaryScreenShell
@@ -549,189 +339,26 @@ export function AiProvidersOpenAIEditPage() {
         {invalidIndexParam || invalidIndex ? (
           <div className={styles.sectionHint}>{t('common.invalid_provider_index')}</div>
         ) : (
-          <div className={styles.openaiEditForm}>
-            <Input
-              label={t('ai_providers.openai_add_modal_name_label')}
-              value={form.name}
-              onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-              disabled={saving || disableControls || isTestingKeys}
-            />
-            <Input
-              label={t('ai_providers.priority_label')}
-              hint={t('ai_providers.priority_hint')}
-              type="number"
-              step={1}
-              value={form.priority ?? ''}
-              onChange={(e) => {
-                const raw = e.target.value;
-                const parsed = raw.trim() === '' ? undefined : Number(raw);
-                setForm((prev) => ({
-                  ...prev,
-                  priority: parsed !== undefined && Number.isFinite(parsed) ? parsed : undefined,
-                }));
-              }}
-              disabled={saving || disableControls || isTestingKeys}
-            />
-            <Input
-              label={t('ai_providers.prefix_label')}
-              placeholder={t('ai_providers.prefix_placeholder')}
-              value={form.prefix ?? ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, prefix: e.target.value }))}
-              hint={t('ai_providers.prefix_hint')}
-              disabled={saving || disableControls || isTestingKeys}
-            />
-            <Input
-              label={t('ai_providers.openai_add_modal_url_label')}
-              value={form.baseUrl}
-              onChange={(e) => setForm((prev) => ({ ...prev, baseUrl: e.target.value }))}
-              disabled={saving || disableControls || isTestingKeys}
-            />
-
-            <HeaderInputList
-              entries={form.headers}
-              onChange={(entries) => setForm((prev) => ({ ...prev, headers: entries }))}
-              addLabel={t('common.custom_headers_add')}
-              keyPlaceholder={t('common.custom_headers_key_placeholder')}
-              valuePlaceholder={t('common.custom_headers_value_placeholder')}
-              removeButtonTitle={t('common.delete')}
-              removeButtonAriaLabel={t('common.delete')}
-              disabled={saving || disableControls || isTestingKeys}
-            />
-
-            {/* 模型配置区域 - 统一布局 */}
-            <div className={styles.modelConfigSection}>
-              {/* 标题行 */}
-              <div className={styles.modelConfigHeader}>
-                <label className={styles.modelConfigTitle}>
-                  {hasIndexParam
-                    ? t('ai_providers.openai_edit_modal_models_label')
-                    : t('ai_providers.openai_add_modal_models_label')}
-                </label>
-                <div className={styles.modelConfigToolbar}>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setForm((prev) => ({
-                      ...prev,
-                      modelEntries: [...prev.modelEntries, { name: '', alias: '' }]
-                    }))}
-                    disabled={saving || disableControls || isTestingKeys}
-                  >
-                    {t('ai_providers.openai_models_add_btn')}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={openOpenaiModelDiscovery}
-                    disabled={saving || disableControls || isTestingKeys}
-                  >
-                    {t('ai_providers.openai_models_fetch_button')}
-                  </Button>
-                </div>
-              </div>
-
-              {/* 提示文本 */}
-              <div className={styles.sectionHint}>{t('ai_providers.openai_models_hint')}</div>
-
-              {/* 模型列表 */}
-              <ModelInputList
-                entries={form.modelEntries}
-                onChange={(entries) => setForm((prev) => ({ ...prev, modelEntries: entries }))}
-                namePlaceholder={t('common.model_name_placeholder')}
-                aliasPlaceholder={t('common.model_alias_placeholder')}
-                aliasFirst
-                disabled={saving || disableControls || isTestingKeys}
-                hideAddButton
-                className={styles.modelInputList}
-                rowClassName={styles.modelInputRow}
-                inputClassName={styles.modelInputField}
-                removeButtonClassName={styles.modelRowRemoveButton}
-                removeButtonTitle={t('common.delete')}
-                removeButtonAriaLabel={t('common.delete')}
-              />
-
-              {/* 测试区域 */}
-              <div className={styles.modelTestPanel}>
-                <div className={styles.modelTestMeta}>
-                  <label className={styles.modelTestLabel}>{t('ai_providers.openai_test_title')}</label>
-                  <span className={styles.modelTestHint}>{t('ai_providers.openai_test_hint')}</span>
-                  <div className={styles.modelTestHint}>
-                    <label>{t('common.stream')}</label>
-                    <ToggleSwitch
-                      checked={streamEnabled}
-                      onChange={(value) => {
-                        setStreamEnabled(value);
-                        resetDraftKeyTestStatuses(form.apiKeyEntries.length);
-                        setTestStatus('idle');
-                        setTestMessage('');
-                      }}
-                      disabled={saving || disableControls || isTestingKeys || testStatus === 'loading'}
-                      ariaLabel={t('common.stream')}
-                    />
-                  </div>
-                </div>
-                <div className={styles.modelTestControls}>
-                  <Select
-                    value={testModel}
-                    options={modelSelectOptions}
-                    onChange={(value) => {
-                      setTestModel(value);
-                      setTestStatus('idle');
-                      setTestMessage('');
-                    }}
-                    placeholder={
-                      availableModels.length
-                        ? t('ai_providers.openai_test_select_placeholder')
-                        : t('ai_providers.openai_test_select_empty')
-                    }
-                    className={styles.openaiTestSelect}
-                    ariaLabel={t('ai_providers.openai_test_title')}
-                    disabled={saving || disableControls || isTestingKeys || testStatus === 'loading' || availableModels.length === 0}
-                  />
-                  <div className={styles.modelTestPanelActions}>
-                    <Button
-                      variant={testStatus === 'error' ? 'danger' : 'secondary'}
-                      size="sm"
-                      onClick={() => void testAllKeys()}
-                      loading={testStatus === 'loading'}
-                      disabled={saving || disableControls || isTestingKeys || testStatus === 'loading' || !hasConfiguredModels || !hasTestableKeys}
-                      title={t('ai_providers.openai_test_all_hint')}
-                      className={`${styles.modelTestAllButton} ${
-                        testStatus === 'error' ? styles.modelTestDangerButton : styles.modelTestSecondaryButton
-                      }`}
-                    >
-                      {t('ai_providers.openai_test_all_action')}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-              {testMessage && (
-                <div
-                  className={styles.modelTestMessage}
-                >
-                  <div
-                  className={`status-badge ${
-                    testStatus === 'error'
-                      ? 'error'
-                      : testStatus === 'success'
-                        ? 'success'
-                        : 'muted'
-                  }`}
-                  >
-                    {testMessage}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className={styles.keyEntriesSection}>
-              <div className={styles.keyEntriesHeader}>
-                <label className={styles.keyEntriesTitle}>{t('ai_providers.openai_add_modal_keys_label')}</label>
-                <span className={styles.keyEntriesHint}>{t('ai_providers.openai_keys_hint')}</span>
-              </div>
-              {renderKeyEntries(form.apiKeyEntries)}
-            </div>
-          </div>
+          <ProviderGroupEditForm
+            provider="openai"
+            form={sharedForm}
+            setForm={setSharedForm}
+            disabled={saving || disableControls}
+            testing={isTestingKeys}
+            summaryStatus={testStatus}
+            summaryMessage={testMessage}
+            onTestAll={testAllKeys}
+            onTestOne={testSingleKey}
+            onOpenModelDiscovery={openOpenaiModelDiscovery}
+            streamEnabled={streamEnabled}
+            onToggleStreamEnabled={(value) => {
+              setStreamEnabled(value);
+              resetDraftKeyTestStatuses(form.apiKeyEntries.length);
+              setTestStatus('idle');
+              setTestMessage('');
+            }}
+            showNameField
+          />
         )}
       </Card>
     </SecondaryScreenShell>

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import styles from '@/pages/AiProvidersPage.module.scss';
+import { hasProviderConnectivityAuth } from './providerConnectivity';
 import type { ProviderKeyEntryDraft, ProviderKind } from './types';
 
 type ProviderConnectivityPanelProps = {
@@ -13,10 +14,13 @@ type ProviderConnectivityPanelProps = {
   disabled?: boolean;
   testing?: boolean;
   entries: ProviderKeyEntryDraft[];
+  globalHeaders?: Array<{ key: string; value: string }>;
   summaryStatus: 'idle' | 'loading' | 'success' | 'error';
   summaryMessage: string;
   titleKey: string;
   hintKey: string;
+  testAllLabelKey?: string;
+  testAllLabelDefault?: string;
   streamEnabled?: boolean;
   onToggleStreamEnabled?: (value: boolean) => void;
   onChangeTestModel: (value: string) => void;
@@ -30,17 +34,27 @@ export function ProviderConnectivityPanel({
   disabled = false,
   testing = false,
   entries,
+  globalHeaders = [],
   summaryStatus,
   summaryMessage,
   titleKey,
   hintKey,
+  testAllLabelKey,
+  testAllLabelDefault,
   streamEnabled = true,
   onToggleStreamEnabled,
   onChangeTestModel,
   onTestAll,
 }: ProviderConnectivityPanelProps) {
   const { t } = useTranslation();
-  const testKey = provider === 'gemini' ? 'gemini' : provider === 'codex' ? 'codex' : 'openai';
+  const testKey =
+    provider === 'gemini'
+      ? 'gemini'
+      : provider === 'codex'
+        ? 'codex'
+        : provider === 'claude'
+          ? 'claude'
+          : 'openai';
   const options = useMemo(() => {
     const seen = new Set<string>();
     return modelEntries.reduce<Array<{ value: string; label: string }>>((acc, entry) => {
@@ -52,7 +66,13 @@ export function ProviderConnectivityPanel({
       return acc;
     }, []);
   }, [modelEntries]);
-  const hasTestableKeys = entries.some((entry) => entry.apiKey.trim());
+  const hasTestableKeys = entries.some((entry) =>
+    hasProviderConnectivityAuth(provider, {
+      headers: globalHeaders,
+      keyHeaders: entry.headers,
+      apiKey: entry.apiKey,
+    })
+  );
 
   return (
     <>
@@ -95,7 +115,9 @@ export function ProviderConnectivityPanel({
                 summaryStatus === 'error' ? styles.modelTestDangerButton : styles.modelTestSecondaryButton
               }`}
             >
-              {t(`ai_providers.${testKey}_test_all_action`, { defaultValue: '测试全部' })}
+              {t(testAllLabelKey ?? `ai_providers.${testKey}_test_all_action`, {
+                defaultValue: testAllLabelDefault ?? '测试全部',
+              })}
             </Button>
           </div>
         </div>

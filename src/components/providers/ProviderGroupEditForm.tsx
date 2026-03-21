@@ -18,11 +18,18 @@ type ProviderGroupEditFormProps = {
   summaryStatus: 'idle' | 'loading' | 'success' | 'error';
   summaryMessage: string;
   onTestAll: () => Promise<void> | void;
-  onTestOne: (index: number) => Promise<void> | void;
+  onTestOne?: (index: number) => Promise<void> | void;
   onOpenModelDiscovery?: () => void;
   streamEnabled?: boolean;
   onToggleStreamEnabled?: (value: boolean) => void;
+  testAllLabelKey?: string;
+  testAllLabelDefault?: string;
+  keyEditorShowStatusColumn?: boolean;
+  keyEditorShowProxyColumn?: boolean;
+  keyEntryHighlightIndexes?: number[];
+  singleEntryMode?: boolean;
   renderExtraFields?: ReactNode;
+  renderBeforeKeyEntries?: ReactNode;
   renderAfterModels?: ReactNode;
   showNameField?: boolean;
 };
@@ -40,7 +47,14 @@ export function ProviderGroupEditForm({
   onOpenModelDiscovery,
   streamEnabled = true,
   onToggleStreamEnabled,
+  testAllLabelKey,
+  testAllLabelDefault,
+  keyEditorShowStatusColumn = true,
+  keyEditorShowProxyColumn = true,
+  keyEntryHighlightIndexes = [],
+  singleEntryMode = false,
   renderExtraFields,
+  renderBeforeKeyEntries,
   renderAfterModels,
   showNameField = false,
 }: ProviderGroupEditFormProps) {
@@ -158,10 +172,13 @@ export function ProviderGroupEditForm({
           disabled={disabled}
           testing={testing}
           entries={form.keyEntries}
+          globalHeaders={form.headers}
           summaryStatus={summaryStatus}
           summaryMessage={summaryMessage}
           titleKey={`ai_providers.${providerKey}_test_title`}
           hintKey={`ai_providers.${providerKey}_test_hint`}
+          testAllLabelKey={testAllLabelKey}
+          testAllLabelDefault={testAllLabelDefault}
           streamEnabled={streamEnabled}
           onToggleStreamEnabled={onToggleStreamEnabled}
           onChangeTestModel={(value) => setForm((prev) => ({ ...prev, testModel: value }))}
@@ -182,6 +199,7 @@ export function ProviderGroupEditForm({
             })}
           </span>
         </div>
+        {renderBeforeKeyEntries}
         <ProviderKeyEntriesEditor
           provider={provider}
           entries={form.keyEntries}
@@ -189,6 +207,10 @@ export function ProviderGroupEditForm({
           testing={testing}
           hasConfiguredModels={form.modelEntries.some((entry) => entry.name.trim())}
           globalHeaders={form.headers}
+          showStatusColumn={keyEditorShowStatusColumn}
+          showProxyColumn={keyEditorShowProxyColumn}
+          highlightIndexes={keyEntryHighlightIndexes}
+          singleEntryMode={singleEntryMode}
           onChange={(entries) => setForm((prev) => ({ ...prev, keyEntries: entries }))}
           onTestOne={onTestOne}
         />

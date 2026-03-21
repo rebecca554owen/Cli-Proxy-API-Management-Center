@@ -10,14 +10,14 @@
 
 import type { SetStateAction } from 'react';
 import { create } from 'zustand';
-import type { ProviderFormState } from '@/components/providers/types';
+import type { ProviderGroupFormState } from '@/components/providers/types';
 
 export type ClaudeTestStatus = 'idle' | 'loading' | 'success' | 'error';
 
 type ClaudeEditDraft = {
   initialized: boolean;
   baselineSignature: string;
-  form: ProviderFormState;
+  form: ProviderGroupFormState;
   testModel: string;
   testStatus: ClaudeTestStatus;
   testMessage: string;
@@ -36,7 +36,7 @@ interface ClaudeEditDraftState {
   setDraftBaselineSignature: (key: string, signature: string) => void;
   setDraftForm: (
     key: string,
-    action: SetStateAction<ProviderFormState>
+    action: SetStateAction<ProviderGroupFormState>
   ) => void;
   setDraftTestModel: (key: string, action: SetStateAction<string>) => void;
   setDraftTestStatus: (
@@ -50,17 +50,14 @@ interface ClaudeEditDraftState {
 const resolveAction = <T,>(action: SetStateAction<T>, prev: T): T =>
   typeof action === 'function' ? (action as (previous: T) => T)(prev) : action;
 
-const buildEmptyForm = (): ProviderFormState => ({
-  apiKey: '',
-  apiKeys: [''],
+const buildEmptyForm = (): ProviderGroupFormState => ({
   prefix: '',
   baseUrl: '',
-  proxyUrl: '',
   headers: [],
-  models: [],
-  excludedModels: [],
+  testModel: '',
   modelEntries: [{ name: '', alias: '' }],
   excludedText: '',
+  keyEntries: [{ apiKey: '', proxyUrl: '', headers: [], testStatus: 'idle', testMessage: '' }],
 });
 
 const buildEmptyDraft = (): ClaudeEditDraft => ({

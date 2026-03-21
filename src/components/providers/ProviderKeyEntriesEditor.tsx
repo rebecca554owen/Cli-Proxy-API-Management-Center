@@ -14,6 +14,10 @@ type ProviderKeyEntriesEditorProps = {
   testing?: boolean;
   hasConfiguredModels?: boolean;
   globalHeaders?: Array<{ key: string; value: string }>;
+  showStatusColumn?: boolean;
+  showProxyColumn?: boolean;
+  highlightIndexes?: number[];
+  singleEntryMode?: boolean;
   onChange: (entries: ProviderKeyEntryDraft[]) => void;
   onTestOne?: (index: number) => Promise<void> | void;
   onAdd?: () => void;
@@ -94,14 +98,33 @@ export function ProviderKeyEntriesEditor({
   testing = false,
   hasConfiguredModels = true,
   globalHeaders = [],
+  showStatusColumn = true,
+  showProxyColumn = true,
+  highlightIndexes = [],
+  singleEntryMode = false,
   onChange,
   onTestOne,
   onAdd,
 }: ProviderKeyEntriesEditorProps) {
   const { t } = useTranslation();
-  const testKey = provider === 'gemini' ? 'gemini' : provider === 'codex' ? 'codex' : 'openai';
+  const testKey =
+    provider === 'gemini'
+      ? 'gemini'
+      : provider === 'codex'
+        ? 'codex'
+        : provider === 'claude'
+          ? 'claude'
+          : 'openai';
   const { showNotification } = useNotificationStore();
   const list = entries.length ? entries : [buildEmptyEntry()];
+  const keyPlaceholderKey =
+    provider === 'openai'
+      ? 'ai_providers.openai_key_placeholder'
+      : `ai_providers.${provider}_add_modal_key_placeholder`;
+  const proxyPlaceholderKey =
+    provider === 'openai'
+      ? 'ai_providers.openai_proxy_placeholder'
+      : `ai_providers.${provider}_add_modal_proxy_placeholder`;
 
   const updateEntries = useCallback(
     (next: ProviderKeyEntryDraft[]) => {
@@ -119,6 +142,9 @@ export function ProviderKeyEntriesEditor({
   };
 
   const addEntry = () => {
+    if (singleEntryMode) {
+      return;
+    }
     if (onAdd) {
       onAdd();
       return;
@@ -127,6 +153,9 @@ export function ProviderKeyEntriesEditor({
   };
 
   const removeEntry = (index: number) => {
+    if (singleEntryMode) {
+      return;
+    }
     updateEntries(list.filter((_, currentIndex) => currentIndex !== index));
   };
 
@@ -149,7 +178,7 @@ export function ProviderKeyEntriesEditor({
             variant="secondary"
             size="sm"
             onClick={addEntry}
-            disabled={disabled || testing}
+            disabled={disabled || testing || singleEntryMode}
             className={styles.addKeyButton}
           >
             {t('ai_providers.openai_keys_add_btn', { defaultValue: '添加密钥' })}
@@ -157,11 +186,17 @@ export function ProviderKeyEntriesEditor({
         </div>
       </div>
       <div className={styles.keyTableShell}>
-        <div className={styles.keyTableHeader}>
+        <div
+          className={styles.keyTableHeader}
+          style={{
+            gridTemplateColumns: `${showStatusColumn ? '46px 56px' : '46px'} minmax(220px, 1.4fr) ${showProxyColumn ? 'minmax(200px, 1.1fr)' : ''} 180px`,
+            minWidth: showProxyColumn ? 760 : 560,
+          }}
+        >
           <div className={styles.keyTableColIndex}>#</div>
-          <div className={styles.keyTableColStatus}>{t('common.status')}</div>
+          {showStatusColumn ? <div className={styles.keyTableColStatus}>{t('common.status')}</div> : null}
           <div className={styles.keyTableColKey}>{t('common.api_key')}</div>
-          <div className={styles.keyTableColProxy}>{t('common.proxy_url')}</div>
+          {showProxyColumn ? <div className={styles.keyTableColProxy}>{t('common.proxy_url')}</div> : null}
           <div className={styles.keyTableColAction}>{t('common.action')}</div>
         </div>
         {list.map((entry, index) => {
@@ -173,17 +208,27 @@ export function ProviderKeyEntriesEditor({
               apiKey: entry.apiKey,
             });
           return (
-            <div key={index} className={styles.keyTableRow}>
+            <div
+              key={index}
+              className={`${styles.keyTableRow} ${highlightIndexes.includes(index) ? styles.keyTableRowDuplicate : ''}`}
+              style={{
+                gridTemplateColumns: `${showStatusColumn ? '46px 56px' : '46px'} minmax(220px, 1.4fr) ${showProxyColumn ? 'minmax(200px, 1.1fr)' : ''} 180px`,
+                minWidth: showProxyColumn ? 760 : 560,
+              }}
+            >
               <div className={styles.keyTableColIndex}>{index + 1}</div>
-              <div className={styles.keyTableColStatus} title={entry.testMessage || ''}>
-                <StatusIcon status={entry.testStatus} />
-              </div>
+              {showStatusColumn ? (
+                <div className={styles.keyTableColStatus} title={entry.testMessage || ''}>
+                  <StatusIcon status={entry.testStatus} />
+                </div>
+              ) : null}
               <div className={styles.keyTableColKey}>
                 <input
                   type="text"
                   value={entry.apiKey}
                   onChange={(event) => updateEntry(index, { apiKey: event.target.value })}
                   onKeyDown={(event) => {
+                    if (singleEntryMode) return;
                     if (event.key !== 'Enter') return;
                     event.preventDefault();
                     updateEntries([
@@ -193,6 +238,7 @@ export function ProviderKeyEntriesEditor({
                     ]);
                   }}
                   onPaste={(event) => {
+                    if (singleEntryMode) return;
                     const pasted = event.clipboardData.getData('text');
                     if (!/[\r\n]+/.test(pasted)) return;
                     event.preventDefault();
@@ -209,20 +255,22 @@ export function ProviderKeyEntriesEditor({
                     ]);
                   }}
                   disabled={disabled || testing}
-                  className={`input ${styles.keyTableInput}`}
-                  placeholder={t('common.api_key')}
+                  className={`input ${styles.keyTableInput} ${highlightIndexes.includes(index) ? styles.keyTableInputDuplicate : ''}`}
+                  placeholder={t(keyPlaceholderKey, { defaultValue: t('common.api_key') })}
                 />
               </div>
-              <div className={styles.keyTableColProxy}>
-                <input
-                  type="text"
-                  value={entry.proxyUrl}
-                  onChange={(event) => updateEntry(index, { proxyUrl: event.target.value })}
-                  disabled={disabled || testing}
-                  className={`input ${styles.keyTableInput}`}
-                  placeholder={t('common.proxy_url')}
-                />
-              </div>
+              {showProxyColumn ? (
+                <div className={styles.keyTableColProxy}>
+                  <input
+                    type="text"
+                    value={entry.proxyUrl}
+                    onChange={(event) => updateEntry(index, { proxyUrl: event.target.value })}
+                    disabled={disabled || testing}
+                    className={`input ${styles.keyTableInput} ${highlightIndexes.includes(index) ? styles.keyTableInputDuplicate : ''}`}
+                    placeholder={t(proxyPlaceholderKey, { defaultValue: t('common.proxy_url') })}
+                  />
+                </div>
+              ) : null}
               <div className={styles.keyTableColAction}>
                 <Button
                   variant="secondary"
@@ -249,7 +297,7 @@ export function ProviderKeyEntriesEditor({
                   variant="ghost"
                   size="sm"
                   onClick={() => removeEntry(index)}
-                  disabled={disabled || testing || list.length <= 1}
+                  disabled={disabled || testing || singleEntryMode || list.length <= 1}
                   className={styles.providerActionButtonCompact}
                 >
                   {t('common.delete')}

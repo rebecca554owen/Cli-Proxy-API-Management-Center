@@ -13,12 +13,79 @@ export interface OpenAIFormState {
   prefix: string;
   baseUrl: string;
   headers: HeaderEntry[];
+  excludedText: string;
   testModel?: string;
   modelEntries: ModelEntry[];
   apiKeyEntries: ApiKeyEntry[];
 }
 
-export type ProviderKind = 'gemini' | 'codex' | 'claude' | 'openai';
+export type ProviderKind = 'gemini' | 'codex' | 'claude' | 'openai' | 'vertex';
+
+export type GroupedProviderKind = 'gemini' | 'codex' | 'claude';
+
+export type ProviderSemanticGroup = 'g1-flat-grouped' | 'g2-provider-with-keys' | 'g3-special-compatible';
+
+export type ProviderActivationStrategy = 'excluded-models-disable-all';
+
+export type ProviderMutationSubject = 'grouped-configs' | 'provider' | 'single-config' | 'special';
+
+export interface ProviderVisualAdapter {
+  provider: ProviderKind;
+  semanticGroup: ProviderSemanticGroup;
+  activationStrategy: ProviderActivationStrategy;
+  mutationSubject: ProviderMutationSubject;
+  useSharedVisualShell: boolean;
+  supportsGroupedPersistence: boolean;
+  supportsMultiKeyEditing: boolean;
+}
+
+export const PROVIDER_VISUAL_ADAPTERS: Record<ProviderKind, ProviderVisualAdapter> = {
+  gemini: {
+    provider: 'gemini',
+    semanticGroup: 'g1-flat-grouped',
+    activationStrategy: 'excluded-models-disable-all',
+    mutationSubject: 'grouped-configs',
+    useSharedVisualShell: true,
+    supportsGroupedPersistence: true,
+    supportsMultiKeyEditing: true,
+  },
+  codex: {
+    provider: 'codex',
+    semanticGroup: 'g1-flat-grouped',
+    activationStrategy: 'excluded-models-disable-all',
+    mutationSubject: 'grouped-configs',
+    useSharedVisualShell: true,
+    supportsGroupedPersistence: true,
+    supportsMultiKeyEditing: true,
+  },
+  openai: {
+    provider: 'openai',
+    semanticGroup: 'g2-provider-with-keys',
+    activationStrategy: 'excluded-models-disable-all',
+    mutationSubject: 'provider',
+    useSharedVisualShell: true,
+    supportsGroupedPersistence: false,
+    supportsMultiKeyEditing: true,
+  },
+  claude: {
+    provider: 'claude',
+    semanticGroup: 'g1-flat-grouped',
+    activationStrategy: 'excluded-models-disable-all',
+    mutationSubject: 'grouped-configs',
+    useSharedVisualShell: true,
+    supportsGroupedPersistence: true,
+    supportsMultiKeyEditing: true,
+  },
+  vertex: {
+    provider: 'vertex',
+    semanticGroup: 'g3-special-compatible',
+    activationStrategy: 'excluded-models-disable-all',
+    mutationSubject: 'single-config',
+    useSharedVisualShell: true,
+    supportsGroupedPersistence: false,
+    supportsMultiKeyEditing: false,
+  },
+};
 
 export interface ProviderKeyEntryDraft {
   apiKey: string;
@@ -44,7 +111,7 @@ export interface ProviderGroupFormState {
 
 export interface ProviderConfigGroup<TConfig> {
   id: string;
-  provider: Exclude<ProviderKind, 'openai'>;
+  provider: GroupedProviderKind;
   title: string;
   baseUrl: string;
   prefix: string;

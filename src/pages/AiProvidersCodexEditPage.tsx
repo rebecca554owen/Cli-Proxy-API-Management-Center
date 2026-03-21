@@ -11,12 +11,9 @@ import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell';
 import {
   ProviderGroupEditForm,
-  buildProviderConfigsFromGroupForm,
   buildProviderGroupEditSignature,
-  buildProviderGroupFormState,
-  groupProviderConfigs,
+  buildProviderConfigsFromGroupForm,
   refreshMonitorProviderMeta,
-  replaceGroupedConfigs,
   resolveConnectivityErrorMessage,
   runProviderConnectivityTest,
 } from '@/components/providers';
@@ -28,11 +25,16 @@ import type { ModelInfo } from '@/utils/models';
 import type { ProviderGroupFormState } from '@/components/providers';
 import layoutStyles from './AiProvidersEditLayout.module.scss';
 import styles from './AiProvidersPage.module.scss';
+import {
+  applyCodexSharedFields,
+  buildCodexFormState,
+  canSyncCodexConfigGroup,
+  hasCodexSharedFieldChanges,
+} from './codexConfigUtils';
 
 type LocationState =
   | {
       fromAiProviders?: boolean;
-      copySource?: ProviderKeyConfig;
       copyIndex?: number;
     }
   | null;
@@ -47,6 +49,29 @@ const buildEmptyForm = (): ProviderGroupFormState => ({
   testModel: '',
   keyEntries: [{ apiKey: '', proxyUrl: '', headers: [], testStatus: 'idle', testMessage: '' }],
   websockets: false,
+});
+
+const buildSingleForm = (config: ProviderKeyConfig): ProviderGroupFormState => ({
+  baseUrl: config.baseUrl ?? '',
+  prefix: config.prefix ?? '',
+  priority: config.priority,
+  headers: config.headers ? Object.entries(config.headers).map(([key, value]) => ({ key, value })) : [],
+  modelEntries:
+    config.models?.length
+      ? config.models.map((model) => ({ name: model.name ?? '', alias: model.alias ?? '' }))
+      : [{ name: '', alias: '' }],
+  excludedText: Array.isArray(config.excludedModels) ? config.excludedModels.join('\n') : '',
+  testModel: config.models?.[0]?.name ?? '',
+  keyEntries: [
+    {
+      apiKey: config.apiKey ?? '',
+      proxyUrl: config.proxyUrl ?? '',
+      headers: config.headers ? Object.entries(config.headers).map(([key, value]) => ({ key, value })) : [],
+      testStatus: 'idle',
+      testMessage: '',
+    },
+  ],
+  websockets: Boolean(config.websockets),
 });
 
 const parseIndexParam = (value: string | undefined) => {
@@ -67,7 +92,7 @@ export function AiProvidersCodexEditPage() {
   const location = useLocation();
   const params = useParams<{ index?: string }>();
 
-  const { showNotification } = useNotificationStore();
+  const { showNotification, showConfirmation } = useNotificationStore();
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
   const disableControls = connectionStatus !== 'connected';
 
@@ -101,12 +126,11 @@ export function AiProvidersCodexEditPage() {
   const hasIndexParam = typeof params.index === 'string';
   const editIndex = useMemo(() => parseIndexParam(params.index), [params.index]);
   const invalidIndexParam = hasIndexParam && editIndex === null;
-  const groupedConfigs = useMemo(() => groupProviderConfigs('codex', configs), [configs]);
-  const initialGroup = useMemo(
-    () => (editIndex === null ? undefined : groupedConfigs.find((group) => group.indexes.includes(editIndex))),
-    [editIndex, groupedConfigs]
+  const initialConfig = useMemo(
+    () => (editIndex === null ? undefined : configs[editIndex]),
+    [configs, editIndex]
   );
-  const invalidIndex = editIndex !== null && !initialGroup;
+  const invalidIndex = editIndex !== null && !initialConfig;
 
   const title =
     editIndex !== null ? t('ai_providers.codex_edit_modal_title') : t('ai_providers.codex_add_modal_title');
@@ -160,22 +184,17 @@ export function AiProvidersCodexEditPage() {
   useEffect(() => {
     if (loading) return;
     const locationState = location.state as LocationState;
-    if (initialGroup) {
-      const nextForm = buildProviderGroupFormState(initialGroup);
+    if (initialConfig) {
+      const nextForm = buildSingleForm(initialConfig);
       setForm(nextForm);
       setBaselineSignature(buildProviderGroupEditSignature(nextForm));
       return;
     }
     if (editIndex === null && typeof locationState?.copyIndex === 'number') {
-      const copyGroup = groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!));
-      if (copyGroup) {
-        const nextForm = buildProviderGroupFormState(copyGroup);
-        nextForm.keyEntries = nextForm.keyEntries.map((entry) => ({
-          ...entry,
-          apiKey: '',
-          testStatus: 'idle',
-          testMessage: '',
-        }));
+      const copySource = configs[locationState.copyIndex];
+      if (copySource) {
+        const nextForm = buildSingleForm(copySource);
+        nextForm.keyEntries = [{ ...nextForm.keyEntries[0], apiKey: '', testStatus: 'idle', testMessage: '' }];
         setForm(nextForm);
         setBaselineSignature(buildProviderGroupEditSignature(nextForm));
         return;
@@ -184,7 +203,7 @@ export function AiProvidersCodexEditPage() {
     const nextForm = buildEmptyForm();
     setForm(nextForm);
     setBaselineSignature(buildProviderGroupEditSignature(nextForm));
-  }, [editIndex, groupedConfigs, initialGroup, loading, location.state]);
+  }, [configs, editIndex, initialConfig, loading, location.state]);
 
   const currentSignature = useMemo(() => buildProviderGroupEditSignature(form), [form]);
   const isDirty = baselineSignature !== currentSignature;
@@ -484,45 +503,70 @@ export function AiProvidersCodexEditPage() {
       showNotification(t('notification.codex_test_key_required'), 'error');
       return;
     }
-    setSaving(true);
-    setError('');
-    try {
-      const locationState = location.state as LocationState;
-      const copyGroup =
-        editIndex === null && typeof locationState?.copyIndex === 'number'
-          ? groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!))
-          : undefined;
-      const nextList =
-        initialGroup
-          ? replaceGroupedConfigs(configs, initialGroup.indexes, payloads)
-          : copyGroup
-            ? replaceGroupedConfigs(
-                configs,
-                [],
-                payloads,
-                Math.max(...copyGroup.indexes) + 1
-              )
-            : [...configs, ...payloads];
+    const nextPayload = payloads[0];
+    const performSave = async (syncGroup: boolean) => {
+      setSaving(true);
+      setError('');
+      try {
+        const nextList =
+          editIndex !== null
+            ? configs.map((item, index) => {
+                if (index === editIndex) return nextPayload;
+                if (syncGroup && canSyncCodexConfigGroup(item, configs[editIndex])) {
+                  return applyCodexSharedFields(item, nextPayload);
+                }
+                return item;
+              })
+            : [...configs, nextPayload];
 
-      await providersApi.saveCodexConfigs(nextList);
-      setConfigs(nextList);
-      updateConfigValue('codex-api-key', nextList);
-      clearCache('codex-api-key');
-      await refreshMonitorProviderMeta();
-      showNotification(
-        editIndex !== null ? t('notification.codex_config_updated') : t('notification.codex_config_added'),
-        'success'
-      );
-      allowNextNavigation();
-      setBaselineSignature(buildProviderGroupEditSignature(form));
-      handleBack();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : '';
-      setError(message);
-      showNotification(`${t('notification.update_failed')}: ${message}`, 'error');
-    } finally {
-      setSaving(false);
+        await providersApi.saveCodexConfigs(nextList);
+        setConfigs(nextList);
+        updateConfigValue('codex-api-key', nextList);
+        clearCache('codex-api-key');
+        await refreshMonitorProviderMeta();
+        showNotification(
+          editIndex !== null ? t('notification.codex_config_updated') : t('notification.codex_config_added'),
+          'success'
+        );
+        allowNextNavigation();
+        setBaselineSignature(buildProviderGroupEditSignature(form));
+        handleBack();
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : '';
+        setError(message);
+        showNotification(`${t('notification.update_failed')}: ${message}`, 'error');
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    const currentConfig = editIndex !== null ? configs[editIndex] : undefined;
+    const siblingCount =
+      currentConfig && editIndex !== null
+        ? configs.filter((item, index) => index !== editIndex && canSyncCodexConfigGroup(item, currentConfig)).length
+        : 0;
+    const shouldPromptSync =
+      Boolean(currentConfig) &&
+      siblingCount > 0 &&
+      hasCodexSharedFieldChanges(buildCodexFormState(currentConfig!), buildCodexFormState(nextPayload));
+
+    if (shouldPromptSync) {
+      showConfirmation({
+        title: '同步相同上游配置',
+        message: `检测到还有 ${siblingCount} 个相同 baseUrl + prefix 的 Codex key。是否将模型映射、代理、请求头、优先级等共享配置同步到这些 key？`,
+        confirmText: '同步保存',
+        cancelText: '仅保存当前',
+        onConfirm: async () => {
+          await performSave(true);
+        },
+        onCancel: () => {
+          void performSave(false);
+        },
+      });
+      return;
     }
+
+    await performSave(false);
   }, [
     allowNextNavigation,
     clearCache,
@@ -530,14 +574,12 @@ export function AiProvidersCodexEditPage() {
     disableControls,
     editIndex,
     form,
-    groupedConfigs,
     handleBack,
-    initialGroup,
     invalidIndex,
     invalidIndexParam,
     loading,
-    location.state,
     saving,
+    showConfirmation,
     showNotification,
     t,
     updateConfigValue,
@@ -607,6 +649,7 @@ export function AiProvidersCodexEditPage() {
                 setStreamEnabled(value);
                 resetConnectivityState();
               }}
+              singleEntryMode
               renderExtraFields={
                 <div className="form-group">
                   <label>{t('ai_providers.codex_websockets_label')}</label>

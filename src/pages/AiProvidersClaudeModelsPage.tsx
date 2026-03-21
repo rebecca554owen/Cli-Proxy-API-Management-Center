@@ -56,7 +56,7 @@ export function AiProvidersClaudeModelsPage() {
     try {
       const list = await modelsApi.fetchClaudeModelsViaApiCall(
         form.baseUrl ?? '',
-        form.apiKey.trim() || undefined,
+        form.keyEntries.map((entry) => entry.apiKey.trim()).find(Boolean) || undefined,
         headerObject
       );
       setModels(list);
@@ -69,10 +69,11 @@ export function AiProvidersClaudeModelsPage() {
       const hasAuthorization = Object.keys(headerObject).some(
         (key) => key.toLowerCase() === 'authorization'
       );
+      const resolvedApiKey = form.keyEntries.map((entry) => entry.apiKey.trim()).find(Boolean) || '';
       const shouldAttachDiag =
         message.toLowerCase().includes('x-api-key') || message.includes('401');
       const diag = shouldAttachDiag
-        ? ` [diag: apiKeyField=${form.apiKey.trim() ? 'yes' : 'no'}, customXApiKey=${
+        ? ` [diag: apiKeyField=${resolvedApiKey ? 'yes' : 'no'}, customXApiKey=${
             hasCustomXApiKey ? 'yes' : 'no'
           }, customAuthorization=${hasAuthorization ? 'yes' : 'no'}]`
         : '';
@@ -80,7 +81,7 @@ export function AiProvidersClaudeModelsPage() {
     } finally {
       setFetching(false);
     }
-  }, [form.apiKey, form.baseUrl, form.headers, t]);
+  }, [form.baseUrl, form.headers, form.keyEntries, t]);
 
   useEffect(() => {
     if (initialLoading) return;
@@ -99,7 +100,8 @@ export function AiProvidersClaudeModelsPage() {
     const hasAuthorization = Object.keys(headerObject).some(
       (key) => key.toLowerCase() === 'authorization'
     );
-    const hasApiKeyField = Boolean(form.apiKey.trim());
+    const resolvedApiKey = form.keyEntries.map((entry) => entry.apiKey.trim()).find(Boolean) || '';
+    const hasApiKeyField = Boolean(resolvedApiKey);
     const canAutoFetch = hasApiKeyField || hasCustomXApiKey || hasAuthorization;
 
     // Avoid firing a guaranteed 401 on initial render (common while the parent form is still
@@ -110,12 +112,12 @@ export function AiProvidersClaudeModelsPage() {
       .sort(([a], [b]) => a.toLowerCase().localeCompare(b.toLowerCase()))
       .map(([key, value]) => `${key}:${value}`)
       .join('|');
-    const signature = `${nextEndpoint}||${form.apiKey.trim()}||${headerSignature}`;
+    const signature = `${nextEndpoint}||${resolvedApiKey}||${headerSignature}`;
     if (autoFetchSignatureRef.current === signature) return;
     autoFetchSignatureRef.current = signature;
 
     void fetchClaudeModelDiscovery();
-  }, [fetchClaudeModelDiscovery, form.apiKey, form.baseUrl, form.headers, initialLoading]);
+  }, [fetchClaudeModelDiscovery, form.baseUrl, form.headers, form.keyEntries, initialLoading]);
 
   const handleBack = useCallback(() => {
     navigate(-1);

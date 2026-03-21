@@ -15,6 +15,7 @@ import styles from '@/pages/AiProvidersPage.module.scss';
 import { ProviderList } from '../ProviderList';
 import { ProviderStatusBar } from '../ProviderStatusBar';
 import {
+  buildProviderIdentityPresentation,
   formatProviderEndpoint,
   getStatsBySource,
   getTotalRequests,
@@ -122,20 +123,31 @@ export function VertexSection({
             );
             const mappingCount = mappingSummary.visible.length + mappingSummary.hiddenCount;
             const endpoint = formatProviderEndpoint(item.baseUrl);
-            const groupName = item.prefix?.trim() || endpoint || `${t('ai_providers.vertex_item_title')} #${index + 1}`;
+            const identity = buildProviderIdentityPresentation({
+              primary: item.prefix?.trim(),
+              endpoint,
+              fallback: `${t('ai_providers.vertex_item_title')} #${index + 1}`,
+            });
 
             return (
               <Fragment>
                 <div className={styles.providerCardHeader}>
                   <div className={styles.providerCardLead}>
-                    <div className={styles.providerMainTitle}>
-                      {t('ai_providers.vertex_item_title')} #{index + 1}
-                    </div>
-                    <div className={styles.providerKeyGroup}>{groupName}</div>
                     <div className={`${styles.providerMetaLine} ${styles.providerMetaInline}`}>
                       <span>P</span>
                       <span className={styles.providerPriorityBadge}>{item.priority ?? 0}</span>
                     </div>
+                    <div className={styles.providerMainTitle}>
+                      {t('ai_providers.vertex_item_title')} #{index + 1}
+                    </div>
+                    <div
+                      className={`${styles.providerKeyGroup} ${
+                        identity.titleTone === 'endpoint' ? styles.providerEndpointTitle : ''
+                      }`}
+                    >
+                      {identity.title}
+                    </div>
+                    {identity.subtitle && <div className={styles.providerKeyGroup}>{identity.subtitle}</div>}
                   </div>
                   <div className={styles.providerMetricGrid}>
                     <div className={styles.providerStatusStats}>
@@ -182,7 +194,6 @@ export function VertexSection({
                   </div>
                   <div className={styles.providerInfoSummary}>
                     <div className={styles.providerInfoCluster}>
-                      {endpoint && <div className={styles.providerMetaLine}>{endpoint}</div>}
                       <div className={`${styles.providerMetaLine} ${styles.providerMetaKey}`}>
                         {maskApiKey(item.apiKey)}
                       </div>

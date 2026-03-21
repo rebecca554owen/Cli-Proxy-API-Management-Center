@@ -13,9 +13,9 @@ import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell';
 import { providersApi } from '@/services/api';
 import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
 import type { ProviderKeyConfig } from '@/types';
+import { buildVertexConfigFromForm, type VertexFormState } from '@/components/providers';
 import { excludedModelsToText, parseExcludedModels } from '@/components/providers/utils';
-import { buildHeaderObject, headersToEntries, normalizeHeaderEntries } from '@/utils/headers';
-import type { VertexFormState } from '@/components/providers';
+import { headersToEntries, normalizeHeaderEntries } from '@/utils/headers';
 import layoutStyles from './AiProvidersEditLayout.module.scss';
 
 type LocationState = { fromAiProviders?: boolean } | null;
@@ -190,32 +190,10 @@ export function AiProvidersVertexEditPage() {
   const handleSave = useCallback(async () => {
     if (!canSave) return;
 
-    const trimmedBaseUrl = (form.baseUrl ?? '').trim();
-    const baseUrl = trimmedBaseUrl || undefined;
-
     setSaving(true);
     setError('');
     try {
-      const payload: ProviderKeyConfig = {
-        apiKey: form.apiKey.trim(),
-        priority:
-          form.priority !== undefined && Number.isFinite(form.priority)
-            ? Math.trunc(form.priority)
-            : undefined,
-        prefix: form.prefix?.trim() || undefined,
-        baseUrl,
-        proxyUrl: form.proxyUrl?.trim() || undefined,
-        headers: buildHeaderObject(form.headers),
-        models: form.modelEntries
-          .map((entry) => {
-            const name = entry.name.trim();
-            const alias = entry.alias.trim();
-            if (!name || !alias) return null;
-            return { name, alias };
-          })
-          .filter(Boolean) as ProviderKeyConfig['models'],
-        excludedModels: parseExcludedModels(form.excludedText),
-      };
+      const payload = buildVertexConfigFromForm(form);
 
       const nextList =
         editIndex !== null

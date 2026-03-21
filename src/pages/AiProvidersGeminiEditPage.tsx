@@ -11,10 +11,10 @@ import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell';
 import {
   ProviderGroupEditForm,
   buildGeminiConfigsFromGroupForm,
+  buildNextProviderList,
   buildProviderGroupEditSignature,
   buildProviderGroupFormState,
   groupProviderConfigs,
-  replaceGroupedConfigs,
   resolveConnectivityErrorMessage,
   runProviderConnectivityTest,
 } from '@/components/providers';
@@ -543,11 +543,10 @@ export function AiProvidersGeminiEditPage() {
           ? groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!))
           : undefined;
 
-      const nextList = initialGroup
-        ? replaceGroupedConfigs(configs, initialGroup.indexes, payloads)
-        : copyGroup
-          ? replaceGroupedConfigs(configs, [], payloads, Math.max(...copyGroup.indexes) + 1)
-          : [...configs, ...payloads];
+      const nextList = buildNextProviderList(configs, payloads, {
+        indexes: initialGroup?.indexes,
+        copyIndexes: copyGroup?.indexes,
+      });
 
       await providersApi.saveGeminiKeys(nextList);
       setConfigs(nextList);

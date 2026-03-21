@@ -7,6 +7,7 @@ import {
   getOpenAIProviderStats,
   getStatsBySource,
   hasDisableAllModelsRule,
+  normalizeClaudeBaseUrl,
   parseExcludedModels,
 } from './utils';
 import type {
@@ -14,21 +15,28 @@ import type {
   ProviderConfigGroup,
   ProviderGroupFormState,
   ProviderKeyEntryDraft,
-  ProviderKind,
+  GroupedProviderKind,
   ProviderFormState,
+  VertexFormState,
 } from './types';
-import type { KeyStats, StatusBarData, UsageDetail } from '@/utils/usage';
+import type { KeyStats, StatusBarData } from '@/utils/usage';
 import {
   buildCandidateUsageSourceIds,
-  calculateStatusBarData,
   lookupStatusBar,
 } from '@/utils/usage';
 
-const normalizeGroupBaseUrl = (value: string | undefined) => String(value ?? '').trim().replace(/\/+$/g, '');
+const normalizeGroupBaseUrl = (provider: GroupedProviderKind, value: string | undefined) => {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return '';
+  if (provider === 'claude') {
+    return normalizeClaudeBaseUrl(trimmed).replace(/\/+$/g, '');
+  }
+  return trimmed.replace(/\/+$/g, '');
+};
 const normalizeGroupPrefix = (value: string | undefined) => String(value ?? '').trim();
 
-const buildGroupKey = (provider: Exclude<ProviderKind, 'openai'>, baseUrl?: string, prefix?: string) =>
-  `${provider}::${normalizeGroupBaseUrl(baseUrl)}::${normalizeGroupPrefix(prefix)}`;
+const buildGroupKey = (provider: GroupedProviderKind, baseUrl?: string, prefix?: string) =>
+  `${provider}::${normalizeGroupBaseUrl(provider, baseUrl)}::${normalizeGroupPrefix(prefix)}`;
 
 const toKeyEntryDraft = (
   apiKey: string | undefined,
@@ -71,7 +79,7 @@ const cloneCloak = (cloak: CloakConfig | undefined) =>
     : undefined;
 
 export const groupProviderConfigs = (
-  provider: Exclude<ProviderKind, 'openai'>,
+  provider: GroupedProviderKind,
   configs: ProviderKeyConfig[] | GeminiKeyConfig[]
 ): ProviderConfigGroup<ProviderKeyConfig | GeminiKeyConfig>[] => {
   const groups = new Map<string, ProviderConfigGroup<ProviderKeyConfig | GeminiKeyConfig>>();
@@ -100,7 +108,10 @@ export const groupProviderConfigs = (
         prefix ||
         endpoint ||
         `${provider.toUpperCase()} #${index + 1}`,
-      baseUrl: String(item.baseUrl ?? ''),
+      baseUrl:
+        provider === 'claude'
+          ? normalizeClaudeBaseUrl(String(item.baseUrl ?? ''))
+          : String(item.baseUrl ?? ''),
       prefix: String(item.prefix ?? ''),
       priority: item.priority,
       headers: item.headers ?? {},
@@ -247,6 +258,87 @@ export const buildOpenAIProviderFromGroupForm = (
   };
 };
 
+export const buildVertexConfigFromForm = (form: VertexFormState): ProviderKeyConfig => {
+  const trimmedBaseUrl = (form.baseUrl ?? '').trim();
+
+  return {
+    apiKey: form.apiKey.trim(),
+    priority:
+      form.priority !== undefined && Number.isFinite(form.priority)
+        ? Math.trunc(form.priority)
+        : undefined,
+    prefix: form.prefix?.trim() || undefined,
+    baseUrl: trimmedBaseUrl || undefined,
+    proxyUrl: form.proxyUrl?.trim() || undefined,
+    headers: buildHeaderObject(form.headers),
+    models: form.modelEntries
+      .map((entry) => {
+        const name = entry.name.trim();
+        const alias = entry.alias.trim();
+        if (!name || !alias) return null;
+        return { name, alias };
+      })
+      .filter(Boolean) as ProviderKeyConfig['models'],
+    excludedModels: parseExcludedModels(form.excludedText),
+  };
+};
+
+export const buildOpenAIProviderFromForm = (
+  form: OpenAIFormState,
+  testModel?: string
+): OpenAIProviderConfig => {
+  const headersObject = buildHeaderObject(form.headers);
+  const models = form.modelEntries
+    .map((entry) => {
+      const name = entry.name.trim();
+      if (!name) return null;
+      const alias = entry.alias.trim();
+      return alias ? { name, alias } : { name };
+    })
+    .filter(Boolean) as OpenAIProviderConfig['models'];
+  const apiKeyEntries = (form.apiKeyEntries ?? []).map((entry) => {
+    const normalizedHeaders = buildHeaderObject(headersToEntries(entry.headers));
+    return {
+      apiKey: String(entry.apiKey ?? '').trim(),
+      proxyUrl: String(entry.proxyUrl ?? '').trim() || undefined,
+      headers: Object.keys(normalizedHeaders).length ? normalizedHeaders : undefined,
+    };
+  });
+
+  return {
+    name: String(form.name ?? '').trim(),
+    baseUrl: form.baseUrl.trim(),
+    prefix: form.prefix.trim() || undefined,
+    priority: form.priority !== undefined ? Math.trunc(form.priority) : undefined,
+    headers: Object.keys(headersObject).length ? headersObject : undefined,
+    apiKeyEntries,
+    models,
+    excludedModels: parseExcludedModels(form.excludedText),
+    testModel: String(testModel ?? form.testModel ?? '').trim() || undefined,
+  };
+};
+
+export const buildNextProviderList = <T,>(
+  configs: T[],
+  replacements: T[],
+  options?: {
+    indexes?: number[];
+    copyIndexes?: number[];
+  }
+) => {
+  const indexes = options?.indexes ?? [];
+  if (indexes.length) {
+    return replaceGroupedConfigs(configs, indexes, replacements);
+  }
+
+  const copyIndexes = options?.copyIndexes ?? [];
+  if (copyIndexes.length) {
+    return replaceGroupedConfigs(configs, [], replacements, Math.max(...copyIndexes) + 1);
+  }
+
+  return [...configs, ...replacements];
+};
+
 export const buildProviderGroupEditSignature = (form: ProviderGroupFormState) =>
   JSON.stringify({
     name: String(form.name ?? '').trim(),
@@ -330,12 +422,12 @@ export const buildOpenAIProviderCard = (
   config: OpenAIProviderConfig,
   index: number,
   keyStats: KeyStats,
-  usageDetails: UsageDetail[]
+  statusBarBySource: Map<string, StatusBarData>
 ) => {
-  const sourceIds = new Set<string>();
-  buildCandidateUsageSourceIds({ prefix: config.prefix }).forEach((id) => sourceIds.add(id));
+  const candidates = new Set<string>();
+  buildCandidateUsageSourceIds({ prefix: config.prefix }).forEach((id) => candidates.add(id));
   (config.apiKeyEntries || []).forEach((entry) => {
-    buildCandidateUsageSourceIds({ apiKey: entry.apiKey }).forEach((id) => sourceIds.add(id));
+    buildCandidateUsageSourceIds({ apiKey: entry.apiKey }).forEach((id) => candidates.add(id));
   });
 
   return {
@@ -344,9 +436,7 @@ export const buildOpenAIProviderCard = (
     baseUrl: formatProviderEndpoint(config.baseUrl),
     keyCount: config.apiKeyEntries?.length ?? 0,
     modelCount: config.models?.length ?? 0,
-    statusData: calculateStatusBarData(
-      usageDetails.filter((detail) => sourceIds.has(detail.source))
-    ),
+    statusData: lookupStatusBar(statusBarBySource, Array.from(candidates)),
     success: getOpenAIProviderStats(config.apiKeyEntries, keyStats, config.prefix).success,
     failure: getOpenAIProviderStats(config.apiKeyEntries, keyStats, config.prefix).failure,
     enabled: !hasDisableAllModelsRule(config.excludedModels),
@@ -379,6 +469,7 @@ export const buildLegacyOpenAIFormState = (
   prefix: groupForm.prefix,
   baseUrl: groupForm.baseUrl,
   headers: groupForm.headers,
+  excludedText: groupForm.excludedText,
   modelEntries: groupForm.modelEntries,
   apiKeyEntries: groupForm.keyEntries.map((entry) => ({
     apiKey: entry.apiKey,

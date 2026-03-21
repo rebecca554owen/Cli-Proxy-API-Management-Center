@@ -151,6 +151,44 @@ export const formatProviderEndpoint = (value?: string): string => {
   }
 };
 
+export type ProviderIdentityPresentation = {
+  title: string;
+  subtitle: string;
+  titleTone: 'default' | 'endpoint';
+};
+
+export const buildProviderIdentityPresentation = (input: {
+  primary?: string;
+  endpoint?: string;
+  fallback: string;
+}): ProviderIdentityPresentation => {
+  const primary = String(input.primary ?? '').trim();
+  const endpoint = String(input.endpoint ?? '').trim();
+  const fallback = String(input.fallback ?? '').trim();
+
+  if (primary) {
+    return {
+      title: primary,
+      subtitle: endpoint && endpoint !== primary ? endpoint : '',
+      titleTone: endpoint && endpoint === primary ? 'endpoint' : 'default',
+    };
+  }
+
+  if (endpoint) {
+    return {
+      title: endpoint,
+      subtitle: '',
+      titleTone: 'endpoint',
+    };
+  }
+
+  return {
+    title: fallback,
+    subtitle: '',
+    titleTone: 'default',
+  };
+};
+
 export type MappingSummaryItem = {
   source: string;
   target: string;

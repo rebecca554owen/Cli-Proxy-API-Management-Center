@@ -215,6 +215,13 @@
   overflow-wrap: anywhere;
 }
 
+.providerEndpointTitle {
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+
 .providerMetaLine {
   color: var(--text-secondary);
   font-size: 11px;
