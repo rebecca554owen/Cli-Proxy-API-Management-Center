@@ -3,7 +3,8 @@
  */
 
 import { apiClient } from './client';
+import type { VersionCheckResponse } from '@/types';
 
 export const versionApi = {
-  checkLatest: () => apiClient.get<Record<string, unknown>>('/latest-version')
+  checkLatest: () => apiClient.get<VersionCheckResponse>('/latest-version'),
 };

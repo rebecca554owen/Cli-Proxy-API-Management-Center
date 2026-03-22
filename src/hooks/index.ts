@@ -9,6 +9,7 @@ export { useInterval } from './useInterval';
 export { useMediaQuery } from './useMediaQuery';
 export { usePagination } from './usePagination';
 export { useHeaderRefresh } from './useHeaderRefresh';
+export { useClickOutside } from './useClickOutside';
 export { useDisableModel } from './useDisableModel';
 export type { UseDisableModelOptions, UseDisableModelReturn } from './useDisableModel';
 export { useMonitorChannelActions } from './useMonitorChannelActions';

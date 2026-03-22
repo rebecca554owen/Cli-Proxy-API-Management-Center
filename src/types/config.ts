@@ -55,6 +55,28 @@ export type RawConfigSection =
   | 'openai-compatibility'
   | 'oauth-excluded-models';
 
+export interface ConfigSectionValueMap {
+  debug: boolean | undefined;
+  'proxy-url': string | undefined;
+  'request-retry': number | undefined;
+  'quota-exceeded': Config['quotaExceeded'];
+  'usage-statistics-enabled': boolean | undefined;
+  'request-log': boolean | undefined;
+  'logging-to-file': boolean | undefined;
+  'logs-max-total-size-mb': number | undefined;
+  'ws-auth': boolean | undefined;
+  'force-model-prefix': boolean | undefined;
+  'routing/strategy': string | undefined;
+  'api-keys': string[] | undefined;
+  ampcode: AmpcodeConfig | undefined;
+  'gemini-api-key': GeminiKeyConfig[] | undefined;
+  'codex-api-key': ProviderKeyConfig[] | undefined;
+  'claude-api-key': ProviderKeyConfig[] | undefined;
+  'vertex-api-key': ProviderKeyConfig[] | undefined;
+  'openai-compatibility': OpenAIProviderConfig[] | undefined;
+  'oauth-excluded-models': Record<string, string[]> | undefined;
+}
+
 export interface ConfigCache {
   data: Config;
   timestamp: number;

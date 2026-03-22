@@ -3,10 +3,11 @@
  */
 
 import { apiClient } from './client';
+import type { ApiKeysResponse } from '@/types';
 
 export const apiKeysApi = {
   async list(): Promise<string[]> {
-    const data = await apiClient.get<Record<string, unknown>>('/api-keys');
+    const data = await apiClient.get<ApiKeysResponse>('/api-keys');
     const keys = data['api-keys'] ?? data.apiKeys;
     return Array.isArray(keys) ? keys.map((key) => String(key)) : [];
   },
@@ -15,5 +16,5 @@ export const apiKeysApi = {
 
   update: (index: number, value: string) => apiClient.patch('/api-keys', { index, value }),
 
-  delete: (index: number) => apiClient.delete(`/api-keys?index=${index}`)
+  delete: (index: number) => apiClient.delete(`/api-keys?index=${index}`),
 };

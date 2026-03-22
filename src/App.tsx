@@ -45,9 +45,11 @@ function App() {
   }, [initializeTheme]);
 
   useEffect(() => {
+    if (document.documentElement.lang === language) {
+      return;
+    }
     setLanguage(language);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // 仅用于首屏同步 i18n 语言
+  }, [language, setLanguage]);
 
   useEffect(() => {
     document.documentElement.lang = language;

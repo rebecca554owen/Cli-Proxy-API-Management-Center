@@ -11,6 +11,8 @@
     "delete": "Delete",
     "edit": "Edit",
     "add": "Add",
+    "enable": "Enable",
+    "disable": "Disable",
     "update": "Update",
     "refresh": "Refresh",
     "close": "Close",
@@ -36,6 +38,7 @@
     "proxy_url": "Proxy",
     "stream": "Streaming Test",
     "priority": "Priority",
+    "model": "Model",
     "alias": "Alias",
     "failure": "Failure",
     "unknown_error": "Unknown error",
@@ -53,7 +56,15 @@
     "model_alias_placeholder": "Alias shown to clients",
     "invalid_provider_index": "Invalid provider index.",
     "unsaved_changes_title": "Unsaved changes",
-    "unsaved_changes_message": "You have unsaved changes. Leaving now will discard them. Do you want to leave?"
+    "unsaved_changes_message": "You have unsaved changes. Leaving now will discard them. Do you want to leave?",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "click_to_view_details": "Click to view details",
+    "test_result": "Test Result",
+    "test_success_message": "Connection test successful",
+    "details": "Details",
+    "index": "Index",
+    "not_tested": "Not Tested"
   },
   "title": {
     "main": "CLI Proxy API Management Center",
@@ -699,7 +710,7 @@
     "credit_label": "Google One AI Credits",
     "credit_amount": "{{count}} credits"
   },
-"kiro_quota": {
+  "kiro_quota": {
     "title": "Kiro Quota",
     "empty_title": "No Kiro Auth Files",
     "empty_desc": "Upload a Kiro credential to view remaining quota.",

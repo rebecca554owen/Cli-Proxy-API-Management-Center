@@ -11,6 +11,8 @@
     "delete": "删除",
     "edit": "编辑",
     "add": "添加",
+    "enable": "启用",
+    "disable": "禁用",
     "update": "更新",
     "refresh": "刷新",
     "close": "关闭",
@@ -36,6 +38,7 @@
     "proxy_url": "代理",
     "stream": "流式测试",
     "priority": "优先级",
+    "model": "模型",
     "alias": "别名",
     "failure": "失败",
     "unknown_error": "未知错误",
@@ -53,7 +56,15 @@
     "model_alias_placeholder": "别名（客户端可见）",
     "invalid_provider_index": "无效的提供商索引。",
     "unsaved_changes_title": "未保存的更改",
-    "unsaved_changes_message": "你有未保存的更改，离开后将丢失这些更改。确定要离开吗？"
+    "unsaved_changes_message": "你有未保存的更改，离开后将丢失这些更改。确定要离开吗？",
+    "enabled": "启用",
+    "disabled": "禁用",
+    "click_to_view_details": "点击查看详细信息",
+    "test_result": "测试结果",
+    "test_success_message": "连接测试成功",
+    "details": "详细信息",
+    "index": "序号",
+    "not_tested": "未测试"
   },
   "title": {
     "main": "CLI Proxy API Management Center",
@@ -699,7 +710,7 @@
     "credit_label": "Google One AI 积分",
     "credit_amount": "{{count}} 积分"
   },
-"kiro_quota": {
+  "kiro_quota": {
     "title": "Kiro 额度",
     "empty_title": "暂无 Kiro 认证",
     "empty_desc": "上传 Kiro 认证文件后即可查看额度。",

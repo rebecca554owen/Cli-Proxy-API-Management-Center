@@ -48,7 +48,7 @@ export function formatDateTime(date: string | Date, locale?: string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
 
   if (isNaN(d.getTime())) {
-    return 'Invalid Date';
+    return '-';
   }
 
   const resolvedLocale = locale?.trim() || resolveDefaultLocale();
@@ -58,7 +58,7 @@ export function formatDateTime(date: string | Date, locale?: string): string {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit'
+    second: '2-digit',
   });
 }
 
@@ -91,6 +91,29 @@ export function formatUnixTimestamp(value: unknown, locale?: string): string {
 
   if (Number.isNaN(date.getTime())) return '';
   return locale ? date.toLocaleString(locale) : date.toLocaleString();
+}
+
+export function formatDate(value: string | Date | null | undefined, locale?: string): string {
+  if (!value) return '-';
+
+  const date = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return '-';
+
+  const resolvedLocale = locale?.trim() || resolveDefaultLocale();
+  return date.toLocaleDateString(resolvedLocale);
+}
+
+export function formatLocaleDateTime(
+  value: string | Date | null | undefined,
+  locale?: string
+): string {
+  if (!value) return '-';
+
+  const date = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return '-';
+
+  const resolvedLocale = locale?.trim() || resolveDefaultLocale();
+  return date.toLocaleString(resolvedLocale);
 }
 
 /**

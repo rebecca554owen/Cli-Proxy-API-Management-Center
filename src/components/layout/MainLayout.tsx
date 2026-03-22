@@ -32,6 +32,7 @@ import {
   useThemeStore,
 } from '@/stores';
 import { monitorApi, versionApi } from '@/services/api';
+import { useClickOutside } from '@/hooks';
 import { triggerHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { LANGUAGE_LABEL_KEYS, LANGUAGE_ORDER } from '@/utils/constants';
 import { isSupportedLanguage } from '@/utils/language';
@@ -344,57 +345,15 @@ export function MainLayout() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!languageMenuOpen) {
-      return;
-    }
+  useClickOutside(languageMenuRef, () => setLanguageMenuOpen(false), {
+    enabled: languageMenuOpen,
+    onEscape: () => setLanguageMenuOpen(false),
+  });
 
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!languageMenuRef.current?.contains(event.target as Node)) {
-        setLanguageMenuOpen(false);
-      }
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setLanguageMenuOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('keydown', handleEscape);
-
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [languageMenuOpen]);
-
-  useEffect(() => {
-    if (!themeMenuOpen) {
-      return;
-    }
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!themeMenuRef.current?.contains(event.target as Node)) {
-        setThemeMenuOpen(false);
-      }
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setThemeMenuOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('keydown', handleEscape);
-
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [themeMenuOpen]);
+  useClickOutside(themeMenuRef, () => setThemeMenuOpen(false), {
+    enabled: themeMenuOpen,
+    onEscape: () => setThemeMenuOpen(false),
+  });
 
   const handleBrandClick = useCallback(() => {
     if (!brandExpanded) {

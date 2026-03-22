@@ -5,10 +5,17 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import { IconGithub, IconBookOpen, IconExternalLink, IconCode } from '@/components/ui/icons';
-import { useAuthStore, useConfigStore, useNotificationStore, useModelsStore, useThemeStore } from '@/stores';
+import {
+  useAuthStore,
+  useConfigStore,
+  useNotificationStore,
+  useModelsStore,
+  useThemeStore,
+} from '@/stores';
 import { configApi } from '@/services/api';
 import { apiKeysApi } from '@/services/api/apiKeys';
 import { classifyModels } from '@/utils/models';
+import { formatLocaleDateTime } from '@/utils/format';
 import { STORAGE_KEY_AUTH } from '@/utils/constants';
 import { INLINE_LOGO_JPEG } from '@/assets/logoInline';
 import iconGemini from '@/assets/icons/gemini.svg';
@@ -51,7 +58,10 @@ export function SystemPage() {
   const modelsError = useModelsStore((state) => state.error);
   const fetchModelsFromStore = useModelsStore((state) => state.fetchModels);
 
-  const [modelStatus, setModelStatus] = useState<{ type: 'success' | 'warning' | 'error' | 'muted'; message: string }>();
+  const [modelStatus, setModelStatus] = useState<{
+    type: 'success' | 'warning' | 'error' | 'muted';
+    message: string;
+  }>();
   const [requestLogModalOpen, setRequestLogModalOpen] = useState(false);
   const [requestLogDraft, setRequestLogDraft] = useState(false);
   const [requestLogTouched, setRequestLogTouched] = useState(false);
@@ -73,7 +83,7 @@ export function SystemPage() {
   const appVersion = __APP_VERSION__ || t('system_info.version_unknown');
   const apiVersion = auth.serverVersion || t('system_info.version_unknown');
   const buildTime = auth.serverBuildDate
-    ? new Date(auth.serverBuildDate).toLocaleString(i18n.language)
+    ? formatLocaleDateTime(auth.serverBuildDate, i18n.language)
     : t('system_info.version_unknown');
 
   const getIconForCategory = (categoryId: string): string | null => {
@@ -136,7 +146,7 @@ export function SystemPage() {
     if (auth.connectionStatus !== 'connected') {
       setModelStatus({
         type: 'warning',
-        message: t('notification.connection_required')
+        message: t('notification.connection_required'),
       });
       return;
     }
@@ -158,11 +168,12 @@ export function SystemPage() {
       const hasModels = list.length > 0;
       setModelStatus({
         type: hasModels ? 'success' : 'warning',
-        message: hasModels ? t('system_info.models_count', { count: list.length }) : t('system_info.models_empty')
+        message: hasModels
+          ? t('system_info.models_count', { count: list.length })
+          : t('system_info.models_empty'),
       });
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+      const message = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
       const suffix = message ? `: ${message}` : '';
       const text = `${t('system_info.models_error')}${suffix}`;
       setModelStatus({ type: 'error', message: text });
@@ -366,61 +377,70 @@ export function SystemPage() {
           </div>
         </Card>
 
-      <Card
-        title={t('system_info.models_title')}
-        extra={
-          <Button variant="secondary" size="sm" onClick={() => fetchModels({ forceRefresh: true })} loading={modelsLoading}>
-            {t('common.refresh')}
-          </Button>
-        }
-      >
-        <p className={styles.sectionDescription}>{t('system_info.models_desc')}</p>
-        {modelStatus && <div className={`status-badge ${modelStatus.type}`}>{modelStatus.message}</div>}
-        {modelsError && <div className="error-box">{modelsError}</div>}
-        {modelsLoading ? (
-          <div className="hint">{t('common.loading')}</div>
-        ) : models.length === 0 ? (
-          <div className="hint">{t('system_info.models_empty')}</div>
-        ) : (
-          <div className="item-list">
-            {groupedModels.map((group) => {
-              const iconSrc = getIconForCategory(group.id);
-              return (
-                <div key={group.id} className="item-row">
-                  <div className="item-meta">
-                    <div className={styles.groupTitle}>
-                      {iconSrc && <img src={iconSrc} alt="" className={styles.groupIcon} />}
-                      <span className="item-title">{group.label}</span>
+        <Card
+          title={t('system_info.models_title')}
+          extra={
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => fetchModels({ forceRefresh: true })}
+              loading={modelsLoading}
+            >
+              {t('common.refresh')}
+            </Button>
+          }
+        >
+          <p className={styles.sectionDescription}>{t('system_info.models_desc')}</p>
+          {modelStatus && (
+            <div className={`status-badge ${modelStatus.type}`}>{modelStatus.message}</div>
+          )}
+          {modelsError && <div className="error-box">{modelsError}</div>}
+          {modelsLoading ? (
+            <div className="hint">{t('common.loading')}</div>
+          ) : models.length === 0 ? (
+            <div className="hint">{t('system_info.models_empty')}</div>
+          ) : (
+            <div className="item-list">
+              {groupedModels.map((group) => {
+                const iconSrc = getIconForCategory(group.id);
+                return (
+                  <div key={group.id} className="item-row">
+                    <div className="item-meta">
+                      <div className={styles.groupTitle}>
+                        {iconSrc && <img src={iconSrc} alt="" className={styles.groupIcon} />}
+                        <span className="item-title">{group.label}</span>
+                      </div>
+                      <div className="item-subtitle">
+                        {t('system_info.models_count', { count: group.items.length })}
+                      </div>
                     </div>
-                    <div className="item-subtitle">{t('system_info.models_count', { count: group.items.length })}</div>
+                    <div className={styles.modelTags}>
+                      {group.items.map((model) => (
+                        <span
+                          key={`${model.name}-${model.alias ?? 'default'}`}
+                          className={styles.modelTag}
+                          title={model.description || ''}
+                        >
+                          <span className={styles.modelName}>{model.name}</span>
+                          {model.alias && <span className={styles.modelAlias}>{model.alias}</span>}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                  <div className={styles.modelTags}>
-                    {group.items.map((model) => (
-                      <span
-                        key={`${model.name}-${model.alias ?? 'default'}`}
-                        className={styles.modelTag}
-                        title={model.description || ''}
-                      >
-                        <span className={styles.modelName}>{model.name}</span>
-                        {model.alias && <span className={styles.modelAlias}>{model.alias}</span>}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
+                );
+              })}
+            </div>
+          )}
+        </Card>
 
-      <Card title={t('system_info.clear_login_title')}>
-        <p className={styles.sectionDescription}>{t('system_info.clear_login_desc')}</p>
-        <div className={styles.clearLoginActions}>
-          <Button variant="danger" onClick={handleClearLoginStorage}>
-            {t('system_info.clear_login_button')}
-          </Button>
-        </div>
-      </Card>
+        <Card title={t('system_info.clear_login_title')}>
+          <p className={styles.sectionDescription}>{t('system_info.clear_login_desc')}</p>
+          <div className={styles.clearLoginActions}>
+            <Button variant="danger" onClick={handleClearLoginStorage}>
+              {t('system_info.clear_login_button')}
+            </Button>
+          </div>
+        </Card>
       </div>
 
       <Modal

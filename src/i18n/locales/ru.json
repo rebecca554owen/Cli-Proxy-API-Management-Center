@@ -11,6 +11,8 @@
     "delete": "Удалить",
     "edit": "Редактировать",
     "add": "Добавить",
+    "enable": "Включить",
+    "disable": "Отключить",
     "update": "Обновить",
     "refresh": "Обновить",
     "close": "Закрыть",
@@ -695,7 +697,7 @@
     "credit_label": "Google One AI кредиты",
     "credit_amount": "{{count}} кредитов"
   },
-"kiro_quota": {
+  "kiro_quota": {
     "title": "Квота Kiro",
     "empty_title": "Файлы авторизации Kiro отсутствуют",
     "empty_desc": "Загрузите учётные данные Kiro, чтобы увидеть оставшуюся квоту.",

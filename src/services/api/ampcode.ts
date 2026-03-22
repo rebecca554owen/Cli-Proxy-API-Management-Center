@@ -8,7 +8,13 @@ import {
   normalizeAmpcodeModelMappings,
   normalizeAmpcodeUpstreamApiKeys,
 } from './transformers';
-import type { AmpcodeConfig, AmpcodeModelMapping, AmpcodeUpstreamApiKeyMapping } from '@/types';
+import type {
+  AmpcodeConfig,
+  AmpcodeModelMapping,
+  AmpcodeModelMappingsResponse,
+  AmpcodeUpstreamApiKeyMapping,
+  AmpcodeUpstreamApiKeysResponse,
+} from '@/types';
 
 const serializeUpstreamApiKeyMappings = (mappings: AmpcodeUpstreamApiKeyMapping[]) =>
   mappings.map((mapping) => ({
@@ -18,31 +24,36 @@ const serializeUpstreamApiKeyMappings = (mappings: AmpcodeUpstreamApiKeyMapping[
 
 export const ampcodeApi = {
   async getAmpcode(): Promise<AmpcodeConfig> {
-    const data = await apiClient.get('/ampcode');
+    const data = await apiClient.get<Record<string, unknown>>('/ampcode');
     return normalizeAmpcodeConfig(data) ?? {};
   },
 
   updateUpstreamUrl: (url: string) => apiClient.put('/ampcode/upstream-url', { value: url }),
   clearUpstreamUrl: () => apiClient.delete('/ampcode/upstream-url'),
 
-  updateUpstreamApiKey: (apiKey: string) => apiClient.put('/ampcode/upstream-api-key', { value: apiKey }),
+  updateUpstreamApiKey: (apiKey: string) =>
+    apiClient.put('/ampcode/upstream-api-key', { value: apiKey }),
   clearUpstreamApiKey: () => apiClient.delete('/ampcode/upstream-api-key'),
 
   async getUpstreamApiKeys(): Promise<AmpcodeUpstreamApiKeyMapping[]> {
-    const data = await apiClient.get<Record<string, unknown>>('/ampcode/upstream-api-keys');
+    const data = await apiClient.get<AmpcodeUpstreamApiKeysResponse>('/ampcode/upstream-api-keys');
     const list = data?.['upstream-api-keys'] ?? data?.upstreamApiKeys ?? data?.items ?? data;
     return normalizeAmpcodeUpstreamApiKeys(list);
   },
 
   saveUpstreamApiKeys: (mappings: AmpcodeUpstreamApiKeyMapping[]) =>
-    apiClient.put('/ampcode/upstream-api-keys', { value: serializeUpstreamApiKeyMappings(mappings) }),
+    apiClient.put('/ampcode/upstream-api-keys', {
+      value: serializeUpstreamApiKeyMappings(mappings),
+    }),
   patchUpstreamApiKeys: (mappings: AmpcodeUpstreamApiKeyMapping[]) =>
-    apiClient.patch('/ampcode/upstream-api-keys', { value: serializeUpstreamApiKeyMappings(mappings) }),
+    apiClient.patch('/ampcode/upstream-api-keys', {
+      value: serializeUpstreamApiKeyMappings(mappings),
+    }),
   deleteUpstreamApiKeys: (upstreamApiKeys: string[]) =>
     apiClient.delete('/ampcode/upstream-api-keys', { data: { value: upstreamApiKeys } }),
 
   async getModelMappings(): Promise<AmpcodeModelMapping[]> {
-    const data = await apiClient.get<Record<string, unknown>>('/ampcode/model-mappings');
+    const data = await apiClient.get<AmpcodeModelMappingsResponse>('/ampcode/model-mappings');
     const list = data?.['model-mappings'] ?? data?.modelMappings ?? data?.items ?? data;
     return normalizeAmpcodeModelMappings(list);
   },
@@ -55,5 +66,6 @@ export const ampcodeApi = {
   deleteModelMappings: (fromList: string[]) =>
     apiClient.delete('/ampcode/model-mappings', { data: { value: fromList } }),
 
-  updateForceModelMappings: (enabled: boolean) => apiClient.put('/ampcode/force-model-mappings', { value: enabled })
+  updateForceModelMappings: (enabled: boolean) =>
+    apiClient.put('/ampcode/force-model-mappings', { value: enabled }),
 };
