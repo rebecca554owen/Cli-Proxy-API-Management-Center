@@ -77,33 +77,37 @@ export function ProviderConnectivityPanel({
   return (
     <>
       <div className={styles.modelTestPanel}>
-        <div className={styles.modelTestMeta}>
-          <label className={styles.modelTestLabel}>{t(titleKey)}</label>
-          <span className={styles.modelTestHint}>{t(hintKey)}</span>
-          <div className={styles.modelTestHint}>
-            <label>{t('common.stream')}</label>
+        <div className={styles.modelTestHeader}>
+          <div className={styles.modelTestMeta}>
+            <label className={styles.modelTestLabel}>{t(titleKey)}</label>
+            <span className={styles.modelTestHint}>{t(hintKey)}</span>
+          </div>
+          <div className={styles.modelTestStreamRow}>
             <ToggleSwitch
               checked={streamEnabled}
               onChange={(value) => onToggleStreamEnabled?.(value)}
               disabled={disabled || testing}
               ariaLabel={t('common.stream')}
+              label={t('common.stream')}
             />
           </div>
         </div>
         <div className={styles.modelTestControls}>
-          <Select
-            value={testModel}
-            options={options}
-            onChange={onChangeTestModel}
-            placeholder={
-              options.length
-                ? t(`ai_providers.${testKey}_test_select_placeholder`)
-                : t(`ai_providers.${testKey}_test_select_empty`)
-            }
-            className={styles.openaiTestSelect}
-            ariaLabel={t(titleKey)}
-            disabled={disabled || testing || options.length === 0}
-          />
+          <div className={styles.modelTestSelectWrap}>
+            <Select
+              value={testModel}
+              options={options}
+              onChange={onChangeTestModel}
+              placeholder={
+                options.length
+                  ? t(`ai_providers.${testKey}_test_select_placeholder`)
+                  : t(`ai_providers.${testKey}_test_select_empty`)
+              }
+              className={styles.openaiTestSelect}
+              ariaLabel={t(titleKey)}
+              disabled={disabled || testing || options.length === 0}
+            />
+          </div>
           <div className={styles.modelTestPanelActions}>
             <Button
               variant={summaryStatus === 'error' ? 'danger' : 'secondary'}
@@ -112,11 +116,13 @@ export function ProviderConnectivityPanel({
               loading={summaryStatus === 'loading'}
               disabled={disabled || testing || !options.length || !hasTestableKeys}
               className={`${styles.modelTestAllButton} ${
-                summaryStatus === 'error' ? styles.modelTestDangerButton : styles.modelTestSecondaryButton
+                summaryStatus === 'error'
+                  ? styles.modelTestDangerButton
+                  : styles.modelTestSecondaryButton
               }`}
             >
               {t(testAllLabelKey ?? `ai_providers.${testKey}_test_all_action`, {
-                defaultValue: testAllLabelDefault ?? '测试全部',
+                defaultValue: testAllLabelDefault ?? '一键测试全部密钥',
               })}
             </Button>
           </div>

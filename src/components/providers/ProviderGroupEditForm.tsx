@@ -1,12 +1,14 @@
-import type { ReactNode } from 'react';
+import { useEffect, useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { HeaderInputList } from '@/components/ui/HeaderInputList';
 import { Input } from '@/components/ui/Input';
 import { ModelInputList } from '@/components/ui/ModelInputList';
+import { buildCandidateUsageSourceIds, lookupStatusBar } from '@/utils/usage';
 import type { ProviderGroupFormState, ProviderKind } from './types';
 import { ProviderConnectivityPanel } from './ProviderConnectivityPanel';
 import { ProviderKeyEntriesEditor } from './ProviderKeyEntriesEditor';
+import { useProviderStats } from './hooks/useProviderStats';
 import styles from '@/pages/AiProvidersPage.module.scss';
 
 type ProviderGroupEditFormProps = {
@@ -60,6 +62,25 @@ export function ProviderGroupEditForm({
 }: ProviderGroupEditFormProps) {
   const { t } = useTranslation();
   const providerKey = provider === 'openai' ? 'openai' : provider;
+  const { statusBarBySource, loadKeyStats } = useProviderStats();
+
+  useEffect(() => {
+    void loadKeyStats();
+  }, [loadKeyStats]);
+
+  const keyEntryStatusBars = useMemo(
+    () =>
+      form.keyEntries.map((entry) =>
+        lookupStatusBar(
+          statusBarBySource,
+          buildCandidateUsageSourceIds({
+            apiKey: entry.apiKey,
+            prefix: form.prefix,
+          })
+        )
+      ),
+    [form.keyEntries, form.prefix, statusBarBySource]
+  );
 
   return (
     <div className={styles.openaiEditForm}>
@@ -165,6 +186,9 @@ export function ProviderGroupEditForm({
           removeButtonTitle={t('common.delete')}
           removeButtonAriaLabel={t('common.delete')}
         />
+      </div>
+
+      <div className={styles.modelTestSection}>
         <ProviderConnectivityPanel
           provider={provider}
           modelEntries={form.modelEntries}
@@ -209,7 +233,9 @@ export function ProviderGroupEditForm({
           globalHeaders={form.headers}
           showStatusColumn={keyEditorShowStatusColumn}
           showProxyColumn={keyEditorShowProxyColumn}
+          showEnabledToggle={provider !== 'openai'}
           highlightIndexes={keyEntryHighlightIndexes}
+          statusBarDataByEntry={keyEntryStatusBars}
           singleEntryMode={singleEntryMode}
           onChange={(entries) => setForm((prev) => ({ ...prev, keyEntries: entries }))}
           onTestOne={onTestOne}
