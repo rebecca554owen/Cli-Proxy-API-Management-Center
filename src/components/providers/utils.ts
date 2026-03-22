@@ -1,26 +1,25 @@
-import type { AmpcodeConfig, AmpcodeModelMapping, AmpcodeUpstreamApiKeyMapping, ApiKeyEntry } from '@/types';
+import type {
+  AmpcodeConfig,
+  AmpcodeModelMapping,
+  AmpcodeUpstreamApiKeyMapping,
+  ApiKeyEntry,
+} from '@/types';
+import {
+  DISABLE_ALL_MODELS_RULE,
+  hasDisableAllModelsRule,
+  stripDisableAllModelsRule,
+  withDisableAllModelsRule,
+  withoutDisableAllModelsRule,
+} from '@/utils/providerRules';
 import { buildCandidateUsageSourceIds, type KeyStatBucket, type KeyStats } from '@/utils/usage';
 import type { AmpcodeFormState, AmpcodeUpstreamApiKeyEntry, ModelEntry } from './types';
 
-export const DISABLE_ALL_MODELS_RULE = '*';
-
-export const hasDisableAllModelsRule = (models?: string[]) =>
-  Array.isArray(models) &&
-  models.some((model) => String(model ?? '').trim() === DISABLE_ALL_MODELS_RULE);
-
-export const stripDisableAllModelsRule = (models?: string[]) =>
-  Array.isArray(models)
-    ? models.filter((model) => String(model ?? '').trim() !== DISABLE_ALL_MODELS_RULE)
-    : [];
-
-export const withDisableAllModelsRule = (models?: string[]) => {
-  const base = stripDisableAllModelsRule(models);
-  return [...base, DISABLE_ALL_MODELS_RULE];
-};
-
-export const withoutDisableAllModelsRule = (models?: string[]) => {
-  const base = stripDisableAllModelsRule(models);
-  return base;
+export {
+  DISABLE_ALL_MODELS_RULE,
+  hasDisableAllModelsRule,
+  stripDisableAllModelsRule,
+  withDisableAllModelsRule,
+  withoutDisableAllModelsRule,
 };
 
 export const parseTextList = (text: string): string[] =>

@@ -4,6 +4,8 @@
 
 import type { AxiosRequestConfig } from 'axios';
 import { apiClient } from './client';
+import type { ApiCallResponse, ApiCallStreamEventPayload, ApiResponseValue } from '@/types';
+import { isRecord, parseJsonRecord } from '@/utils/errors';
 
 export interface ApiCallRequest {
   authIndex?: string;
@@ -15,7 +17,7 @@ export interface ApiCallRequest {
   stream?: boolean;
 }
 
-export interface ApiCallResult<T = unknown> {
+export interface ApiCallResult<T = ApiResponseValue> {
   statusCode: number;
   header: Record<string, string[]>;
   bodyText: string;
@@ -35,7 +37,9 @@ export interface ApiCallStreamConfig {
   timeout?: number;
 }
 
-const normalizeBody = (input: unknown): { bodyText: string; body: unknown | null } => {
+const normalizeBody = (
+  input: ApiResponseValue | undefined
+): { bodyText: string; body: ApiResponseValue | null } => {
   if (input === undefined || input === null) {
     return { bodyText: '', body: null };
   }
@@ -60,18 +64,15 @@ const normalizeBody = (input: unknown): { bodyText: string; body: unknown | null
   }
 };
 
-const normalizeStreamEvent = (input: Record<string, unknown>): ApiCallStreamEvent => ({
+const normalizeStreamEvent = (input: ApiCallStreamEventPayload): ApiCallStreamEvent => ({
   type: String(input.type ?? '') as ApiCallStreamEvent['type'],
   statusCode: Number(input.statusCode ?? input.status_code ?? 0) || undefined,
-  header: (input.header ?? input.headers ?? undefined) as Record<string, string[]> | undefined,
+  header: input.header ?? input.headers,
   chunk: typeof input.chunk === 'string' ? input.chunk : undefined,
   error: typeof input.error === 'string' ? input.error : undefined,
 });
 
 export const getApiCallErrorMessage = (result: ApiCallResult): string => {
-  const isRecord = (value: unknown): value is Record<string, unknown> =>
-    value !== null && typeof value === 'object';
-
   const status = result.statusCode;
   const body = result.body;
   const bodyText = result.bodyText;
@@ -131,11 +132,8 @@ const buildAbortSignal = (config?: ApiCallStreamConfig) => {
 };
 
 export const apiCallApi = {
-  request: async (
-    payload: ApiCallRequest,
-    config?: AxiosRequestConfig
-  ): Promise<ApiCallResult> => {
-    const response = await apiClient.post<Record<string, unknown>>('/api-call', payload, config);
+  request: async (payload: ApiCallRequest, config?: AxiosRequestConfig): Promise<ApiCallResult> => {
+    const response = await apiClient.post<ApiCallResponse>('/api-call', payload, config);
     const statusCode = Number(response?.status_code ?? response?.statusCode ?? 0);
     const header = (response?.header ?? response?.headers ?? {}) as Record<string, string[]>;
     const { bodyText, body } = normalizeBody(response?.body);
@@ -144,7 +142,7 @@ export const apiCallApi = {
       statusCode,
       header,
       bodyText,
-      body
+      body,
     };
   },
 
@@ -190,16 +188,22 @@ export const apiCallApi = {
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed) continue;
-          onEvent(normalizeStreamEvent(JSON.parse(trimmed) as Record<string, unknown>));
+          const parsed = parseJsonRecord(trimmed);
+          if (parsed) {
+            onEvent(normalizeStreamEvent(parsed));
+          }
         }
       }
 
       buffer += decoder.decode();
       if (buffer.trim()) {
-        onEvent(normalizeStreamEvent(JSON.parse(buffer.trim()) as Record<string, unknown>));
+        const parsed = parseJsonRecord(buffer.trim());
+        if (parsed) {
+          onEvent(normalizeStreamEvent(parsed));
+        }
       }
     } finally {
       cleanup();
     }
-  }
+  },
 };

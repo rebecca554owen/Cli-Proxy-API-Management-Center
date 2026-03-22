@@ -4,38 +4,46 @@
 
 import { apiClient } from './client';
 import type { AuthFilesResponse } from '@/types/authFile';
-import type { OAuthModelAliasEntry } from '@/types';
+import { getErrorStatus, isRecord, parseJsonRecord } from '@/utils/errors';
+import type {
+  ModelsResponse,
+  OAuthExcludedModelsResponse,
+  OAuthModelAliasEntry,
+  OAuthModelAliasResponse,
+} from '@/types';
 
-type StatusError = { status?: number };
 type AuthFileStatusResponse = { status: string; disabled: boolean };
+type AuthFileModelItem = {
+  id: string;
+  display_name?: string;
+  type?: string;
+  owned_by?: string;
+};
 
 export type CodexCleanupEvent =
   | { type: 'start'; total: number }
-  | { type: 'progress'; index: number; total: number; name: string; auth_index: string; status_code?: number; deleted?: boolean; error?: string }
+  | {
+      type: 'progress';
+      index: number;
+      total: number;
+      name: string;
+      auth_index: string;
+      status_code?: number;
+      deleted?: boolean;
+      error?: string;
+    }
   | { type: 'done'; total: number; deleted: number };
 export const AUTH_FILE_INVALID_JSON_OBJECT_ERROR = 'AUTH_FILE_INVALID_JSON_OBJECT';
-
-const getStatusCode = (err: unknown): number | undefined => {
-  if (!err || typeof err !== 'object') return undefined;
-  if ('status' in err) return (err as StatusError).status;
-  return undefined;
-};
 
 const parseAuthFileJsonObject = (rawText: string): Record<string, unknown> => {
   const trimmed = rawText.trim();
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(trimmed) as unknown;
-  } catch {
+  const parsed = parseJsonRecord(trimmed);
+  if (!parsed) {
     throw new Error(AUTH_FILE_INVALID_JSON_OBJECT_ERROR);
   }
 
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(AUTH_FILE_INVALID_JSON_OBJECT_ERROR);
-  }
-
-  return { ...(parsed as Record<string, unknown>) };
+  return { ...parsed };
 };
 
 const saveAuthFileText = async (name: string, text: string) => {
@@ -47,15 +55,15 @@ export const isAuthFileInvalidJsonObjectError = (err: unknown): boolean =>
   err instanceof Error && err.message === AUTH_FILE_INVALID_JSON_OBJECT_ERROR;
 
 const normalizeOauthExcludedModels = (payload: unknown): Record<string, string[]> => {
-  if (!payload || typeof payload !== 'object') return {};
+  if (!isRecord(payload)) return {};
 
-  const record = payload as Record<string, unknown>;
+  const record = payload;
   const source = record['oauth-excluded-models'] ?? record.items ?? payload;
-  if (!source || typeof source !== 'object') return {};
+  if (!isRecord(source)) return {};
 
   const result: Record<string, string[]> = {};
 
-  Object.entries(source as Record<string, unknown>).forEach(([provider, models]) => {
+  Object.entries(source).forEach(([provider, models]) => {
     const key = String(provider ?? '')
       .trim()
       .toLowerCase();
@@ -85,35 +93,32 @@ const normalizeOauthExcludedModels = (payload: unknown): Record<string, string[]
 };
 
 const normalizeOauthModelAlias = (payload: unknown): Record<string, OAuthModelAliasEntry[]> => {
-  if (!payload || typeof payload !== 'object') return {};
+  if (!isRecord(payload)) return {};
 
-  const record = payload as Record<string, unknown>;
-  const source =
-    record['oauth-model-alias'] ??
-    record.items ??
-    payload;
-  if (!source || typeof source !== 'object') return {};
+  const record = payload;
+  const source = record['oauth-model-alias'] ?? record.items ?? payload;
+  if (!isRecord(source)) return {};
 
   const result: Record<string, OAuthModelAliasEntry[]> = {};
 
-  Object.entries(source as Record<string, unknown>).forEach(([channel, mappings]) => {
+  Object.entries(source).forEach(([channel, mappings]) => {
     const key = String(channel ?? '')
       .trim()
       .toLowerCase();
     if (!key) return;
     if (!Array.isArray(mappings)) return;
 
-	    const seen = new Set<string>();
-	    const normalized = mappings
-	      .map((item) => {
-	        if (!item || typeof item !== 'object') return null;
-	        const entry = item as Record<string, unknown>;
-	        const name = String(entry.name ?? entry.id ?? entry.model ?? '').trim();
-	        const alias = String(entry.alias ?? '').trim();
-	        if (!name || !alias) return null;
-	        const fork = entry.fork === true;
-	        return fork ? { name, alias, fork } : { name, alias };
-	      })
+    const seen = new Set<string>();
+    const normalized = mappings
+      .map((item) => {
+        if (!isRecord(item)) return null;
+        const entry = item;
+        const name = String(entry.name ?? entry.id ?? entry.model ?? '').trim();
+        const alias = String(entry.alias ?? '').trim();
+        if (!name || !alias) return null;
+        const fork = entry.fork === true;
+        return fork ? { name, alias, fork } : { name, alias };
+      })
       .filter(Boolean)
       .filter((entry) => {
         const aliasEntry = entry as OAuthModelAliasEntry;
@@ -129,6 +134,16 @@ const normalizeOauthModelAlias = (payload: unknown): Record<string, OAuthModelAl
   });
 
   return result;
+};
+
+type OauthExcludedModelsMutation = {
+  provider: string;
+  models: string[];
+};
+
+type OauthModelAliasMutation = {
+  channel: string;
+  aliases: OAuthModelAliasEntry[];
 };
 
 const OAUTH_MODEL_ALIAS_ENDPOINT = '/oauth-model-alias';
@@ -150,9 +165,12 @@ export const authFilesApi = {
   deleteAll: () => apiClient.delete('/auth-files', { params: { all: true } }),
 
   downloadText: async (name: string): Promise<string> => {
-    const response = await apiClient.getRaw(`/auth-files/download?name=${encodeURIComponent(name)}`, {
-      responseType: 'blob'
-    });
+    const response = await apiClient.getRaw(
+      `/auth-files/download?name=${encodeURIComponent(name)}`,
+      {
+        responseType: 'blob',
+      }
+    );
     const blob = response.data as Blob;
     return blob.text();
   },
@@ -169,22 +187,28 @@ export const authFilesApi = {
 
   // OAuth 排除模型
   async getOauthExcludedModels(): Promise<Record<string, string[]>> {
-    const data = await apiClient.get('/oauth-excluded-models');
+    const data = await apiClient.get<OAuthExcludedModelsResponse>('/oauth-excluded-models');
     return normalizeOauthExcludedModels(data);
   },
 
   saveOauthExcludedModels: (provider: string, models: string[]) =>
-    apiClient.patch('/oauth-excluded-models', { provider, models }),
+    apiClient.patch<void, OauthExcludedModelsMutation>('/oauth-excluded-models', {
+      provider,
+      models,
+    }),
 
   deleteOauthExcludedEntry: (provider: string) =>
     apiClient.delete(`/oauth-excluded-models?provider=${encodeURIComponent(provider)}`),
 
   replaceOauthExcludedModels: (map: Record<string, string[]>) =>
-    apiClient.put('/oauth-excluded-models', normalizeOauthExcludedModels(map)),
+    apiClient.put<void, Record<string, string[]>>(
+      '/oauth-excluded-models',
+      normalizeOauthExcludedModels(map)
+    ),
 
   // OAuth 模型别名
   async getOauthModelAlias(): Promise<Record<string, OAuthModelAliasEntry[]>> {
-    const data = await apiClient.get(OAUTH_MODEL_ALIAS_ENDPOINT);
+    const data = await apiClient.get<OAuthModelAliasResponse>(OAUTH_MODEL_ALIAS_ENDPOINT);
     return normalizeOauthModelAlias(data);
   },
 
@@ -192,8 +216,12 @@ export const authFilesApi = {
     const normalizedChannel = String(channel ?? '')
       .trim()
       .toLowerCase();
-    const normalizedAliases = normalizeOauthModelAlias({ [normalizedChannel]: aliases })[normalizedChannel] ?? [];
-    await apiClient.patch(OAUTH_MODEL_ALIAS_ENDPOINT, { channel: normalizedChannel, aliases: normalizedAliases });
+    const normalizedAliases =
+      normalizeOauthModelAlias({ [normalizedChannel]: aliases })[normalizedChannel] ?? [];
+    await apiClient.patch<void, OauthModelAliasMutation>(OAUTH_MODEL_ALIAS_ENDPOINT, {
+      channel: normalizedChannel,
+      aliases: normalizedAliases,
+    });
   },
 
   deleteOauthModelAlias: async (channel: string) => {
@@ -202,45 +230,49 @@ export const authFilesApi = {
       .toLowerCase();
 
     try {
-      await apiClient.patch(OAUTH_MODEL_ALIAS_ENDPOINT, { channel: normalizedChannel, aliases: [] });
+      await apiClient.patch<void, OauthModelAliasMutation>(OAUTH_MODEL_ALIAS_ENDPOINT, {
+        channel: normalizedChannel,
+        aliases: [],
+      });
     } catch (err: unknown) {
-      const status = getStatusCode(err);
+      const status = getErrorStatus(err);
       if (status !== 405) throw err;
-      await apiClient.delete(`${OAUTH_MODEL_ALIAS_ENDPOINT}?channel=${encodeURIComponent(normalizedChannel)}`);
+      await apiClient.delete(
+        `${OAUTH_MODEL_ALIAS_ENDPOINT}?channel=${encodeURIComponent(normalizedChannel)}`
+      );
     }
   },
 
   // 获取认证凭证支持的模型
-  async getModelsForAuthFile(name: string): Promise<{ id: string; display_name?: string; type?: string; owned_by?: string }[]> {
-    const data = await apiClient.get<Record<string, unknown>>(
+  async getModelsForAuthFile(name: string): Promise<AuthFileModelItem[]> {
+    const data = await apiClient.get<ModelsResponse<AuthFileModelItem>>(
       `/auth-files/models?name=${encodeURIComponent(name)}`
     );
-    const models = data.models ?? data['models'];
-    return Array.isArray(models)
-      ? (models as { id: string; display_name?: string; type?: string; owned_by?: string }[])
-      : [];
+    return Array.isArray(data.models) ? data.models : [];
   },
 
   // 获取指定 channel 的模型定义
-  async getModelDefinitions(channel: string): Promise<{ id: string; display_name?: string; type?: string; owned_by?: string }[]> {
-    const normalizedChannel = String(channel ?? '').trim().toLowerCase();
+  async getModelDefinitions(channel: string): Promise<AuthFileModelItem[]> {
+    const normalizedChannel = String(channel ?? '')
+      .trim()
+      .toLowerCase();
     if (!normalizedChannel) return [];
-    const data = await apiClient.get<Record<string, unknown>>(
+    const data = await apiClient.get<ModelsResponse<AuthFileModelItem>>(
       `/model-definitions/${encodeURIComponent(normalizedChannel)}`
     );
-    const models = data.models ?? data['models'];
-    return Array.isArray(models)
-      ? (models as { id: string; display_name?: string; type?: string; owned_by?: string }[])
-      : [];
+    return Array.isArray(data.models) ? data.models : [];
   },
 
   // Codex 凭证清理（NDJSON 流式）
-  async codexCleanup(onEvent: (event: CodexCleanupEvent) => void, signal?: AbortSignal): Promise<void> {
+  async codexCleanup(
+    onEvent: (event: CodexCleanupEvent) => void,
+    signal?: AbortSignal
+  ): Promise<void> {
     const { baseUrl, managementKey } = apiClient.getFetchContext();
     const resp = await fetch(`${baseUrl}/custom/codex-cleanup`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${managementKey}`,
+        Authorization: `Bearer ${managementKey}`,
         'Content-Type': 'application/json',
       },
       signal,
@@ -262,13 +294,17 @@ export const authFilesApi = {
         if (!trimmed) continue;
         try {
           onEvent(JSON.parse(trimmed) as CodexCleanupEvent);
-        } catch { /* skip malformed lines */ }
+        } catch {
+          /* skip malformed lines */
+        }
       }
     }
     if (buffer.trim()) {
       try {
         onEvent(JSON.parse(buffer.trim()) as CodexCleanupEvent);
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
   },
 };

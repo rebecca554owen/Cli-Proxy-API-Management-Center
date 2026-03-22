@@ -12,9 +12,9 @@ import type {
   MonitorTimeRangeQuery,
   MonitorDailyTrendItem,
 } from '@/services/api/monitor';
-import { hasDisableAllModelsRule } from '@/components/providers/utils';
 import type { MonitorSourceMeta } from '@/utils/monitor';
 import { formatGeminiSource, formatMonitorAlias, getProviderDisplayParts } from '@/utils/monitor';
+import { hasDisableAllModelsRule } from '@/utils/providerRules';
 import { buildCandidateUsageSourceIds } from '@/utils/usage';
 import { maskApiKey } from '@/utils/format';
 import { maskSecret } from '@/utils/monitor';
@@ -38,7 +38,10 @@ interface MonitorResourceEntry<T> {
 interface MonitorStoreState {
   providerMeta: MonitorResourceEntry<MonitorProviderMeta>;
   kpiCache: Record<string, MonitorResourceEntry<MonitorKpiData>>;
-  modelDistributionCache: Record<string, MonitorResourceEntry<{ items: MonitorModelDistributionItem[] }>>;
+  modelDistributionCache: Record<
+    string,
+    MonitorResourceEntry<{ items: MonitorModelDistributionItem[] }>
+  >;
   dailyTrendCache: Record<string, MonitorResourceEntry<{ items: MonitorDailyTrendItem[] }>>;
   hourlyModelsCache: Record<string, MonitorResourceEntry<MonitorHourlyModelsData>>;
   hourlyTokensCache: Record<string, MonitorResourceEntry<MonitorHourlyTokensData>>;
@@ -52,7 +55,10 @@ interface MonitorStoreState {
     params?: MonitorTimeRangeQuery & { sort?: 'requests' | 'tokens'; limit?: number },
     force?: boolean
   ) => Promise<{ items: MonitorModelDistributionItem[] }>;
-  ensureDailyTrend: (params?: MonitorTimeRangeQuery, force?: boolean) => Promise<{ items: MonitorDailyTrendItem[] }>;
+  ensureDailyTrend: (
+    params?: MonitorTimeRangeQuery,
+    force?: boolean
+  ) => Promise<{ items: MonitorDailyTrendItem[] }>;
   ensureHourlyModels: (
     params?: MonitorTimeRangeQuery & { hours?: number; limit?: number },
     force?: boolean
@@ -126,7 +132,7 @@ const EMPTY_PROVIDER_META: MonitorProviderMeta = {
   sourceMetaMap: {},
 };
 
-const isFreshEntry = <T,>(entry: MonitorResourceEntry<T> | undefined, ttl: number) =>
+const isFreshEntry = <T>(entry: MonitorResourceEntry<T> | undefined, ttl: number) =>
   Boolean(entry?.updatedAt && Date.now() - entry.updatedAt < ttl);
 
 const getErrorMessage = (error: unknown) =>
@@ -139,8 +145,7 @@ const normalizeParams = <T extends object>(params?: T) =>
       .sort(([a], [b]) => a.localeCompare(b))
   ) as T;
 
-export const serializeMonitorParams = (params?: object) =>
-  JSON.stringify(normalizeParams(params));
+export const serializeMonitorParams = (params?: object) => JSON.stringify(normalizeParams(params));
 
 const getHostLabel = (value?: string) => {
   const trimmed = String(value ?? '').trim();
@@ -176,9 +181,10 @@ const collectSourceAliases = (input: {
     aliases.add(prefix);
   }
 
-  buildCandidateUsageSourceIds({ apiKey: apiKey || undefined, prefix: prefix || undefined }).forEach(
-    (id) => aliases.add(id)
-  );
+  buildCandidateUsageSourceIds({
+    apiKey: apiKey || undefined,
+    prefix: prefix || undefined,
+  }).forEach((id) => aliases.add(id));
 
   (input.extra || []).forEach((value) => {
     const trimmed = String(value ?? '').trim();
@@ -340,18 +346,23 @@ const buildProviderMeta = async (): Promise<MonitorProviderMeta> => {
     const apiKey = config.apiKey;
     if (apiKey) {
       const providerName = config.prefix?.trim() || 'Gemini';
-      registerSourceMeta(collectSourceAliases({ apiKey, prefix: config.prefix }), providerName, 'Gemini', {
-        source: apiKey,
-        canonicalSource: apiKey,
-        kind: 'gemini',
-        providerType: 'Gemini',
-        disabled: hasDisableAllModelsRule(config.excludedModels),
-        canToggle: true,
-        copyValue: apiKey,
-        editPath: `/ai-providers/gemini/${index}`,
-        configIndex: index,
-        summary: buildSourceSummary(config.prefix, config.baseUrl),
-      });
+      registerSourceMeta(
+        collectSourceAliases({ apiKey, prefix: config.prefix }),
+        providerName,
+        'Gemini',
+        {
+          source: apiKey,
+          canonicalSource: apiKey,
+          kind: 'gemini',
+          providerType: 'Gemini',
+          disabled: hasDisableAllModelsRule(config.excludedModels),
+          canToggle: true,
+          copyValue: apiKey,
+          editPath: `/ai-providers/gemini/${index}`,
+          configIndex: index,
+          summary: buildSourceSummary(config.prefix, config.baseUrl),
+        }
+      );
     }
   });
 
@@ -359,18 +370,23 @@ const buildProviderMeta = async (): Promise<MonitorProviderMeta> => {
     const apiKey = config.apiKey;
     if (apiKey) {
       const providerName = config.prefix?.trim() || 'Claude';
-      registerSourceMeta(collectSourceAliases({ apiKey, prefix: config.prefix }), providerName, 'Claude', {
-        source: apiKey,
-        canonicalSource: apiKey,
-        kind: 'claude',
-        providerType: 'Claude',
-        disabled: hasDisableAllModelsRule(config.excludedModels),
-        canToggle: true,
-        copyValue: apiKey,
-        editPath: `/ai-providers/claude/${index}`,
-        configIndex: index,
-        summary: buildSourceSummary(config.prefix, config.baseUrl),
-      });
+      registerSourceMeta(
+        collectSourceAliases({ apiKey, prefix: config.prefix }),
+        providerName,
+        'Claude',
+        {
+          source: apiKey,
+          canonicalSource: apiKey,
+          kind: 'claude',
+          providerType: 'Claude',
+          disabled: hasDisableAllModelsRule(config.excludedModels),
+          canToggle: true,
+          copyValue: apiKey,
+          editPath: `/ai-providers/claude/${index}`,
+          configIndex: index,
+          summary: buildSourceSummary(config.prefix, config.baseUrl),
+        }
+      );
     }
   });
 
@@ -378,18 +394,23 @@ const buildProviderMeta = async (): Promise<MonitorProviderMeta> => {
     const apiKey = config.apiKey;
     if (apiKey) {
       const providerName = config.prefix?.trim() || 'Codex';
-      registerSourceMeta(collectSourceAliases({ apiKey, prefix: config.prefix }), providerName, 'Codex', {
-        source: apiKey,
-        canonicalSource: apiKey,
-        kind: 'codex',
-        providerType: 'Codex',
-        disabled: hasDisableAllModelsRule(config.excludedModels),
-        canToggle: true,
-        copyValue: apiKey,
-        editPath: `/ai-providers/codex/${index}`,
-        configIndex: index,
-        summary: buildSourceSummary(config.prefix, config.baseUrl),
-      });
+      registerSourceMeta(
+        collectSourceAliases({ apiKey, prefix: config.prefix }),
+        providerName,
+        'Codex',
+        {
+          source: apiKey,
+          canonicalSource: apiKey,
+          kind: 'codex',
+          providerType: 'Codex',
+          disabled: hasDisableAllModelsRule(config.excludedModels),
+          canToggle: true,
+          copyValue: apiKey,
+          editPath: `/ai-providers/codex/${index}`,
+          configIndex: index,
+          summary: buildSourceSummary(config.prefix, config.baseUrl),
+        }
+      );
     }
   });
 
@@ -397,18 +418,23 @@ const buildProviderMeta = async (): Promise<MonitorProviderMeta> => {
     const apiKey = config.apiKey;
     if (apiKey) {
       const providerName = config.prefix?.trim() || 'Vertex';
-      registerSourceMeta(collectSourceAliases({ apiKey, prefix: config.prefix }), providerName, 'Vertex', {
-        source: apiKey,
-        canonicalSource: apiKey,
-        kind: 'vertex',
-        providerType: 'Vertex',
-        disabled: hasDisableAllModelsRule(config.excludedModels),
-        canToggle: true,
-        copyValue: apiKey,
-        editPath: `/ai-providers/vertex/${index}`,
-        configIndex: index,
-        summary: buildSourceSummary(config.prefix, config.baseUrl),
-      });
+      registerSourceMeta(
+        collectSourceAliases({ apiKey, prefix: config.prefix }),
+        providerName,
+        'Vertex',
+        {
+          source: apiKey,
+          canonicalSource: apiKey,
+          kind: 'vertex',
+          providerType: 'Vertex',
+          disabled: hasDisableAllModelsRule(config.excludedModels),
+          canToggle: true,
+          copyValue: apiKey,
+          editPath: `/ai-providers/vertex/${index}`,
+          configIndex: index,
+          summary: buildSourceSummary(config.prefix, config.baseUrl),
+        }
+      );
     }
   });
 
@@ -433,9 +459,7 @@ const buildProviderMeta = async (): Promise<MonitorProviderMeta> => {
     const providerName = authTypeToProvider[fileType] || fileType;
     const rawAuthIndex = (file as Record<string, unknown>)['auth_index'] ?? file.authIndex;
     const authIndexKey =
-      rawAuthIndex !== undefined && rawAuthIndex !== null
-        ? String(rawAuthIndex).trim()
-        : '';
+      rawAuthIndex !== undefined && rawAuthIndex !== null ? String(rawAuthIndex).trim() : '';
     const aliases = collectAuthFileAliases(name, authIndexKey);
     registerSourceMeta(aliases, providerName, providerName, {
       source: name,
@@ -469,7 +493,7 @@ const buildProviderMeta = async (): Promise<MonitorProviderMeta> => {
   };
 };
 
-const updateRecordEntry = <T,>(
+const updateRecordEntry = <T>(
   record: Record<string, MonitorResourceEntry<T>>,
   key: string,
   entry: MonitorResourceEntry<T>
@@ -479,7 +503,7 @@ const updateRecordEntry = <T,>(
 });
 
 export const useMonitorStore = create<MonitorStoreState>((set, get) => {
-  const ensureRecord = async <T,>(
+  const ensureRecord = async <T>(
     recordKey: keyof Pick<
       MonitorStoreState,
       | 'kpiCache'
@@ -514,44 +538,56 @@ export const useMonitorStore = create<MonitorStoreState>((set, get) => {
     const promise = fetcher()
       .then((data) => {
         set((state) => ({
-          [recordKey]: updateRecordEntry(state[recordKey] as Record<string, MonitorResourceEntry<T>>, key, {
-            data,
-            error: null,
-            loading: false,
-            updatedAt: Date.now(),
-            promise: null,
-          }),
+          [recordKey]: updateRecordEntry(
+            state[recordKey] as Record<string, MonitorResourceEntry<T>>,
+            key,
+            {
+              data,
+              error: null,
+              loading: false,
+              updatedAt: Date.now(),
+              promise: null,
+            }
+          ),
         }));
         return data;
       })
       .catch((error) => {
         const message = getErrorMessage(error);
         set((state) => ({
-          [recordKey]: updateRecordEntry(state[recordKey] as Record<string, MonitorResourceEntry<T>>, key, {
-            data: currentEntry?.data,
-            error: message,
-            loading: false,
-            updatedAt: currentEntry?.updatedAt ?? null,
-            promise: null,
-          }),
+          [recordKey]: updateRecordEntry(
+            state[recordKey] as Record<string, MonitorResourceEntry<T>>,
+            key,
+            {
+              data: currentEntry?.data,
+              error: message,
+              loading: false,
+              updatedAt: currentEntry?.updatedAt ?? null,
+              promise: null,
+            }
+          ),
         }));
         throw error;
       });
 
     set((state) => ({
-      [recordKey]: updateRecordEntry(state[recordKey] as Record<string, MonitorResourceEntry<T>>, key, {
-        data: currentEntry?.data,
-        error: null,
-        loading: true,
-        updatedAt: currentEntry?.updatedAt ?? null,
-        promise,
-      }),
+      [recordKey]: updateRecordEntry(
+        state[recordKey] as Record<string, MonitorResourceEntry<T>>,
+        key,
+        {
+          data: currentEntry?.data,
+          error: null,
+          loading: true,
+          updatedAt: currentEntry?.updatedAt ?? null,
+          promise,
+        }
+      ),
     }));
 
     return promise;
   };
 
-  const ensureSingle = async <T,>(
+  const ensureSingle = async <T>(
     stateKey: 'providerMeta' | 'serviceHealth',
     ttl: number,
     fetcher: () => Promise<T>,
@@ -637,7 +673,13 @@ export const useMonitorStore = create<MonitorStoreState>((set, get) => {
       ensureSingle('providerMeta', MONITOR_CACHE_TTL.providerMeta, buildProviderMeta, force),
     ensureKpi: (params = {}, force = false) => {
       const normalized = normalizeParams(params);
-      return ensureRecord('kpiCache', serializeMonitorParams(normalized), MONITOR_CACHE_TTL.kpi, () => monitorApi.getKpi(normalized), force);
+      return ensureRecord(
+        'kpiCache',
+        serializeMonitorParams(normalized),
+        MONITOR_CACHE_TTL.kpi,
+        () => monitorApi.getKpi(normalized),
+        force
+      );
     },
     ensureModelDistribution: (params = {}, force = false) => {
       const normalized = normalizeParams(params);
@@ -680,7 +722,12 @@ export const useMonitorStore = create<MonitorStoreState>((set, get) => {
       );
     },
     ensureServiceHealth: (force = false) =>
-      ensureSingle('serviceHealth', MONITOR_CACHE_TTL.serviceHealth, () => monitorApi.getServiceHealth(), force),
+      ensureSingle(
+        'serviceHealth',
+        MONITOR_CACHE_TTL.serviceHealth,
+        () => monitorApi.getServiceHealth(),
+        force
+      ),
     ensureChannelStats: (params = {}, force = false) => {
       const normalized = normalizeParams(params);
       return ensureRecord(

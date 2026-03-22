@@ -5,14 +5,24 @@
 
 import { create } from 'zustand';
 import type { Config } from '@/types';
-import type { RawConfigSection } from '@/types/config';
+import type { ConfigSectionValueMap, RawConfigSection } from '@/types/config';
 import { configApi } from '@/services/api/config';
 import { CACHE_EXPIRY_MS } from '@/utils/constants';
 
-interface ConfigCache {
-  data: unknown;
+type ConfigSectionValue =
+  | NonNullable<Config['raw']>[RawConfigSection]
+  | Exclude<ReturnType<typeof extractSectionValue>, undefined>;
+
+interface CacheEntry<T> {
+  data: T;
   timestamp: number;
 }
+
+type FullConfigCache = CacheEntry<Config>;
+type SectionConfigCache = CacheEntry<ConfigSectionValue>;
+type ConfigCache = FullConfigCache | SectionConfigCache;
+
+type SectionValueMap = ConfigSectionValueMap;
 
 interface ConfigState {
   config: Config | null;
@@ -23,9 +33,12 @@ interface ConfigState {
   // 操作
   fetchConfig: {
     (section?: undefined, forceRefresh?: boolean): Promise<Config>;
-    (section: RawConfigSection, forceRefresh?: boolean): Promise<unknown>;
+    <K extends RawConfigSection>(
+      section: K,
+      forceRefresh?: boolean
+    ): Promise<SectionValueMap[K] | undefined>;
   };
-  updateConfigValue: (section: RawConfigSection, value: unknown) => void;
+  updateConfigValue: <K extends RawConfigSection>(section: K, value: SectionValueMap[K]) => void;
   clearCache: (section?: RawConfigSection) => void;
   isCacheValid: (section?: RawConfigSection) => boolean;
 }
@@ -33,73 +46,74 @@ interface ConfigState {
 let configRequestToken = 0;
 let inFlightConfigRequest: { id: number; promise: Promise<Config> } | null = null;
 
-const SECTION_KEYS: RawConfigSection[] = [
-  'debug',
-  'proxy-url',
-  'request-retry',
-  'quota-exceeded',
-  'usage-statistics-enabled',
-  'request-log',
-  'logging-to-file',
-  'logs-max-total-size-mb',
-  'ws-auth',
-  'force-model-prefix',
-  'routing/strategy',
-  'api-keys',
-  'ampcode',
-  'gemini-api-key',
-  'codex-api-key',
-  'claude-api-key',
-  'vertex-api-key',
-  'openai-compatibility',
-  'oauth-excluded-models'
-];
+type ConfigPropertyKey = Exclude<keyof Config, 'raw'>;
 
-const extractSectionValue = (config: Config | null, section?: RawConfigSection) => {
-  if (!config) return undefined;
-  switch (section) {
-    case 'debug':
-      return config.debug;
-    case 'proxy-url':
-      return config.proxyUrl;
-    case 'request-retry':
-      return config.requestRetry;
-    case 'quota-exceeded':
-      return config.quotaExceeded;
-    case 'usage-statistics-enabled':
-      return config.usageStatisticsEnabled;
-    case 'request-log':
-      return config.requestLog;
-    case 'logging-to-file':
-      return config.loggingToFile;
-    case 'logs-max-total-size-mb':
-      return config.logsMaxTotalSizeMb;
-    case 'ws-auth':
-      return config.wsAuth;
-    case 'force-model-prefix':
-      return config.forceModelPrefix;
-    case 'routing/strategy':
-      return config.routingStrategy;
-    case 'api-keys':
-      return config.apiKeys;
-    case 'ampcode':
-      return config.ampcode;
-    case 'gemini-api-key':
-      return config.geminiApiKeys;
-    case 'codex-api-key':
-      return config.codexApiKeys;
-    case 'claude-api-key':
-      return config.claudeApiKeys;
-    case 'vertex-api-key':
-      return config.vertexApiKeys;
-    case 'openai-compatibility':
-      return config.openaiCompatibility;
-    case 'oauth-excluded-models':
-      return config.oauthExcludedModels;
-    default:
-      if (!section) return undefined;
-      return config.raw?.[section];
+const SECTION_CONFIG_KEYS: Record<RawConfigSection, ConfigPropertyKey> = {
+  debug: 'debug',
+  'proxy-url': 'proxyUrl',
+  'request-retry': 'requestRetry',
+  'quota-exceeded': 'quotaExceeded',
+  'usage-statistics-enabled': 'usageStatisticsEnabled',
+  'request-log': 'requestLog',
+  'logging-to-file': 'loggingToFile',
+  'logs-max-total-size-mb': 'logsMaxTotalSizeMb',
+  'ws-auth': 'wsAuth',
+  'force-model-prefix': 'forceModelPrefix',
+  'routing/strategy': 'routingStrategy',
+  'api-keys': 'apiKeys',
+  ampcode: 'ampcode',
+  'gemini-api-key': 'geminiApiKeys',
+  'codex-api-key': 'codexApiKeys',
+  'claude-api-key': 'claudeApiKeys',
+  'vertex-api-key': 'vertexApiKeys',
+  'openai-compatibility': 'openaiCompatibility',
+  'oauth-excluded-models': 'oauthExcludedModels',
+};
+
+const SECTION_KEYS = Object.keys(SECTION_CONFIG_KEYS) as RawConfigSection[];
+
+const MAX_CACHE_ENTRIES = SECTION_KEYS.length + 1;
+
+const pruneExpiredCache = (cache: Map<string, ConfigCache>, now: number) => {
+  const nextCache = new Map<string, ConfigCache>();
+
+  cache.forEach((entry, key) => {
+    if (now - entry.timestamp < CACHE_EXPIRY_MS) {
+      nextCache.set(key, entry);
+    }
+  });
+
+  if (nextCache.size <= MAX_CACHE_ENTRIES) {
+    return nextCache;
   }
+
+  return new Map(
+    Array.from(nextCache.entries())
+      .sort(([, left], [, right]) => right.timestamp - left.timestamp)
+      .slice(0, MAX_CACHE_ENTRIES)
+  );
+};
+
+const setConfigSectionValue = <K extends RawConfigSection>(
+  config: Config,
+  section: K,
+  value: SectionValueMap[K]
+) => {
+  const configKey = SECTION_CONFIG_KEYS[section];
+  (config[configKey] as SectionValueMap[K] | undefined) = value;
+};
+
+const extractSectionValue = <K extends RawConfigSection>(config: Config | null, section?: K) => {
+  if (!config) return undefined;
+  if (!section) return undefined;
+
+  const configKey = SECTION_CONFIG_KEYS[section];
+  const sectionValue = config[configKey];
+  if (sectionValue !== undefined) {
+    return sectionValue as SectionValueMap[K];
+  }
+
+  return config.raw?.[section] as SectionValueMap[K] | undefined;
 };
 
 export const useConfigStore = create<ConfigState>((set, get) => ({
@@ -110,11 +124,17 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
 
   fetchConfig: (async (section?: RawConfigSection, forceRefresh: boolean = false) => {
     const { cache, isCacheValid } = get();
+    const now = Date.now();
+    const prunedCache = pruneExpiredCache(cache, now);
+
+    if (prunedCache.size !== cache.size) {
+      set({ cache: prunedCache });
+    }
 
     // 检查缓存
     const cacheKey = section || '__full__';
     if (!forceRefresh && isCacheValid(section)) {
-      const cached = cache.get(cacheKey);
+      const cached = prunedCache.get(cacheKey);
       if (cached) {
         return cached.data;
       }
@@ -122,7 +142,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
 
     // section 缓存未命中但 full 缓存可用时，直接复用已获取到的配置，避免重复 /config 请求
     if (!forceRefresh && section && isCacheValid()) {
-      const fullCached = cache.get('__full__');
+      const fullCached = prunedCache.get('__full__');
       if (fullCached?.data) {
         return extractSectionValue(fullCached.data as Config, section);
       }
@@ -142,15 +162,13 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       const requestPromise = configApi.getConfig();
       inFlightConfigRequest = { id: requestId, promise: requestPromise };
       const data = await requestPromise;
-      const now = Date.now();
-
       // 如果在请求过程中连接已被切换/登出，则忽略旧请求的结果，避免覆盖新会话的状态
       if (requestId !== configRequestToken) {
         return section ? extractSectionValue(data, section) : data;
       }
 
       // 更新缓存
-      const newCache = new Map(cache);
+      const newCache = pruneExpiredCache(new Map(prunedCache), now);
       newCache.set('__full__', { data, timestamp: now });
       SECTION_KEYS.forEach((key) => {
         const value = extractSectionValue(data, key);
@@ -162,17 +180,21 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       set({
         config: data,
         cache: newCache,
-        loading: false
+        loading: false,
       });
 
       return section ? extractSectionValue(data, section) : data;
     } catch (error: unknown) {
       const message =
-        error instanceof Error ? error.message : typeof error === 'string' ? error : 'Failed to fetch config';
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Failed to fetch config';
       if (requestId === configRequestToken) {
         set({
           error: message || 'Failed to fetch config',
-          loading: false
+          loading: false,
         });
       }
       throw error;
@@ -189,67 +211,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       raw[section] = value;
       const nextConfig: Config = { ...(state.config || {}), raw };
 
-      switch (section) {
-        case 'debug':
-          nextConfig.debug = value as Config['debug'];
-          break;
-        case 'proxy-url':
-          nextConfig.proxyUrl = value as Config['proxyUrl'];
-          break;
-        case 'request-retry':
-          nextConfig.requestRetry = value as Config['requestRetry'];
-          break;
-        case 'quota-exceeded':
-          nextConfig.quotaExceeded = value as Config['quotaExceeded'];
-          break;
-        case 'usage-statistics-enabled':
-          nextConfig.usageStatisticsEnabled = value as Config['usageStatisticsEnabled'];
-          break;
-        case 'request-log':
-          nextConfig.requestLog = value as Config['requestLog'];
-          break;
-        case 'logging-to-file':
-          nextConfig.loggingToFile = value as Config['loggingToFile'];
-          break;
-        case 'logs-max-total-size-mb':
-          nextConfig.logsMaxTotalSizeMb = value as Config['logsMaxTotalSizeMb'];
-          break;
-        case 'ws-auth':
-          nextConfig.wsAuth = value as Config['wsAuth'];
-          break;
-        case 'force-model-prefix':
-          nextConfig.forceModelPrefix = value as Config['forceModelPrefix'];
-          break;
-        case 'routing/strategy':
-          nextConfig.routingStrategy = value as Config['routingStrategy'];
-          break;
-        case 'api-keys':
-          nextConfig.apiKeys = value as Config['apiKeys'];
-          break;
-        case 'ampcode':
-          nextConfig.ampcode = value as Config['ampcode'];
-          break;
-        case 'gemini-api-key':
-          nextConfig.geminiApiKeys = value as Config['geminiApiKeys'];
-          break;
-        case 'codex-api-key':
-          nextConfig.codexApiKeys = value as Config['codexApiKeys'];
-          break;
-        case 'claude-api-key':
-          nextConfig.claudeApiKeys = value as Config['claudeApiKeys'];
-          break;
-        case 'vertex-api-key':
-          nextConfig.vertexApiKeys = value as Config['vertexApiKeys'];
-          break;
-        case 'openai-compatibility':
-          nextConfig.openaiCompatibility = value as Config['openaiCompatibility'];
-          break;
-        case 'oauth-excluded-models':
-          nextConfig.oauthExcludedModels = value as Config['oauthExcludedModels'];
-          break;
-        default:
-          break;
-      }
+      setConfigSectionValue(nextConfig, section, value);
 
       return { config: nextConfig };
     });
@@ -283,10 +245,17 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   isCacheValid: (section) => {
     const { cache } = get();
     const cacheKey = section || '__full__';
-    const cached = cache.get(cacheKey);
+    const now = Date.now();
+    const prunedCache = pruneExpiredCache(cache, now);
+
+    if (prunedCache.size !== cache.size) {
+      set({ cache: prunedCache });
+    }
+
+    const cached = prunedCache.get(cacheKey);
 
     if (!cached) return false;
 
-    return Date.now() - cached.timestamp < CACHE_EXPIRY_MS;
-  }
+    return now - cached.timestamp < CACHE_EXPIRY_MS;
+  },
 }));
