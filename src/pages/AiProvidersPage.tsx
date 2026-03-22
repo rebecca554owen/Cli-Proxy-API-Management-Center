@@ -7,6 +7,7 @@ import {
   CodexSection,
   GeminiSection,
   OpenAISection,
+  groupProviderConfigs,
   persistProviderConfigToggle,
   VertexSection,
   ProviderNav,
@@ -203,8 +204,8 @@ export function AiProvidersPage() {
   );
 
   const deleteGemini = async (index: number) => {
-    const entry = geminiKeys[index];
-    if (!entry) return;
+    const group = groupProviderConfigs('gemini', geminiKeys).find((item) => item.primaryIndex === index);
+    if (!group) return;
     showConfirmation({
       title: t('ai_providers.gemini_delete_title', { defaultValue: 'Delete Gemini Key' }),
       message: t('ai_providers.gemini_delete_confirm'),
@@ -212,11 +213,13 @@ export function AiProvidersPage() {
       confirmText: t('common.confirm'),
       onConfirm: async () => {
         try {
-          await providersApi.deleteGeminiKey(entry.apiKey);
-          const next = geminiKeys.filter((_, idx) => idx !== index);
+          const indexSet = new Set(group.indexes);
+          const next = geminiKeys.filter((_, idx) => !indexSet.has(idx));
+          await providersApi.saveGeminiKeys(next);
           setGeminiKeys(next);
           updateConfigValue('gemini-api-key', next);
           clearCache('gemini-api-key');
+          await refreshMonitorProviderMeta();
           showNotification(t('notification.gemini_key_deleted'), 'success');
         } catch (err: unknown) {
           const message = getErrorMessage(err);
@@ -232,28 +235,25 @@ export function AiProvidersPage() {
     enabled: boolean
   ) => {
     if (provider === 'gemini') {
-      const current = geminiKeys[index];
-      if (!current) return;
-
-      const switchingKey = `${provider}:${current.apiKey}`;
+      const group = groupProviderConfigs('gemini', geminiKeys).find((item) => item.primaryIndex === index);
+      if (!group) return;
+      const switchingKey = `${provider}:${group.id}`;
       setConfigSwitchingKey(switchingKey);
-
       const previousList = geminiKeys;
-      const nextItem = setProviderEntryEnabled(current, enabled);
-      const nextList = previousList.map((item, idx) => (idx === index ? nextItem : item));
+      const indexSet = new Set(group.indexes);
+      const nextList = previousList.map((item, idx) =>
+        indexSet.has(idx) ? setProviderEntryEnabled(item, enabled) : item
+      );
 
       setGeminiKeys(nextList);
       updateConfigValue('gemini-api-key', nextList);
       clearCache('gemini-api-key');
 
       try {
-        await persistProviderConfigToggle({
-          list: previousList,
-          index,
-          enabled,
-          save: providersApi.saveGeminiKeys,
-          section: 'gemini-api-key',
-        });
+        await providersApi.saveGeminiKeys(nextList);
+        updateConfigValue('gemini-api-key', nextList);
+        clearCache('gemini-api-key');
+        await refreshMonitorProviderMeta();
         showNotification(
           enabled ? t('notification.config_enabled') : t('notification.config_disabled'),
           'success'
@@ -308,17 +308,16 @@ export function AiProvidersPage() {
       return;
     }
 
-    const source =
-      provider === 'codex' ? codexConfigs : provider === 'claude' ? claudeConfigs : vertexConfigs;
-
     if (provider === 'claude') {
-      const current = claudeConfigs[index];
-      if (!current) return;
-      const switchingKey = `${provider}:${current.apiKey}`;
+      const group = groupProviderConfigs('claude', claudeConfigs).find((item) => item.primaryIndex === index);
+      if (!group) return;
+      const switchingKey = `${provider}:${group.id}`;
       setConfigSwitchingKey(switchingKey);
       const previousList = claudeConfigs;
-      const nextItem = setProviderEntryEnabled(current, enabled);
-      const nextList = previousList.map((item, idx) => (idx === index ? nextItem : item));
+      const indexSet = new Set(group.indexes);
+      const nextList = previousList.map((item, idx) =>
+        indexSet.has(idx) ? setProviderEntryEnabled(item, enabled) : item
+      );
 
       setClaudeConfigs(nextList);
       updateConfigValue('claude-api-key', nextList);
@@ -343,13 +342,15 @@ export function AiProvidersPage() {
     }
 
     if (provider === 'codex') {
-      const current = codexConfigs[index];
-      if (!current) return;
-      const switchingKey = `${provider}:${current.apiKey}`;
+      const group = groupProviderConfigs('codex', codexConfigs).find((item) => item.primaryIndex === index);
+      if (!group) return;
+      const switchingKey = `${provider}:${group.id}`;
       setConfigSwitchingKey(switchingKey);
       const previousList = codexConfigs;
-      const nextItem = setProviderEntryEnabled(current, enabled);
-      const nextList = previousList.map((item, idx) => (idx === index ? nextItem : item));
+      const indexSet = new Set(group.indexes);
+      const nextList = previousList.map((item, idx) =>
+        indexSet.has(idx) ? setProviderEntryEnabled(item, enabled) : item
+      );
 
       setCodexConfigs(nextList);
       updateConfigValue('codex-api-key', nextList);
@@ -373,13 +374,13 @@ export function AiProvidersPage() {
       return;
     }
 
-    const current = source[index];
+    const current = vertexConfigs[index];
     if (!current) return;
 
     const switchingKey = `${provider}:${current.apiKey}`;
     setConfigSwitchingKey(switchingKey);
 
-    const previousList = source;
+    const previousList = vertexConfigs;
     const nextItem = setProviderEntryEnabled(current, enabled);
     const nextList = previousList.map((item, idx) => (idx === index ? nextItem : item));
 
@@ -411,9 +412,11 @@ export function AiProvidersPage() {
   };
 
   const deleteProviderEntry = async (type: 'codex' | 'claude', index: number) => {
-    const source = type === 'codex' ? codexConfigs : claudeConfigs;
-    const entry = source[index];
-    if (!entry) return;
+    const group =
+      type === 'codex'
+        ? groupProviderConfigs('codex', codexConfigs).find((item) => item.primaryIndex === index)
+        : groupProviderConfigs('claude', claudeConfigs).find((item) => item.primaryIndex === index);
+    if (!group) return;
     showConfirmation({
       title: t(`ai_providers.${type}_delete_title`, {
         defaultValue: `Delete ${type === 'codex' ? 'Codex' : 'Claude'} Config`,
@@ -423,8 +426,9 @@ export function AiProvidersPage() {
       confirmText: t('common.confirm'),
       onConfirm: async () => {
         try {
+          const indexSet = new Set(group.indexes);
           if (type === 'codex') {
-            const next = codexConfigs.filter((_, idx) => idx !== index);
+            const next = codexConfigs.filter((_, idx) => !indexSet.has(idx));
             await providersApi.saveCodexConfigs(next);
             setCodexConfigs(next);
             updateConfigValue('codex-api-key', next);
@@ -432,7 +436,7 @@ export function AiProvidersPage() {
             await refreshMonitorProviderMeta();
             showNotification(t('notification.codex_config_deleted'), 'success');
           } else {
-            const next = claudeConfigs.filter((_, idx) => idx !== index);
+            const next = claudeConfigs.filter((_, idx) => !indexSet.has(idx));
             await providersApi.saveClaudeConfigs(next);
             setClaudeConfigs(next);
             updateConfigValue('claude-api-key', next);

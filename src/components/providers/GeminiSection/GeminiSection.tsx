@@ -5,22 +5,17 @@ import { Card } from '@/components/ui/Card';
 import iconGemini from '@/assets/icons/gemini.svg';
 import type { GeminiKeyConfig } from '@/types';
 import { maskApiKey } from '@/utils/format';
-import {
-  buildCandidateUsageSourceIds,
-  lookupStatusBar,
-  type KeyStats,
-  type StatusBarData,
-} from '@/utils/usage';
+import type { KeyStats, StatusBarData } from '@/utils/usage';
 import styles from '@/pages/AiProvidersPage.module.scss';
 import { ProviderList } from '../ProviderList';
 import { ProviderStatusBar } from '../ProviderStatusBar';
 import {
   buildProviderIdentityPresentation,
   formatProviderEndpoint,
-  getStatsBySource,
-  hasDisableAllModelsRule,
   summarizeMappings,
 } from '../utils';
+import { buildProviderGroupCard, groupProviderConfigs } from '../groupedProviderUtils';
+import type { ProviderConfigGroup } from '../types';
 
 interface GeminiSectionProps {
   configs: GeminiKeyConfig[];
@@ -52,6 +47,7 @@ export function GeminiSection({
   const { t } = useTranslation();
   const actionsDisabled = disableControls || loading || isSwitching;
   const toggleDisabled = disableControls || loading || isSwitching;
+  const groups = groupProviderConfigs('gemini', configs);
 
   return (
     <>
@@ -68,10 +64,11 @@ export function GeminiSection({
           </Button>
         }
       >
-        <ProviderList<GeminiKeyConfig>
-          items={configs}
+        <ProviderList<ProviderConfigGroup<GeminiKeyConfig>>
+          items={groups}
           loading={loading}
-          keyField={(item, index) => `${item.apiKey}-${index}`}
+          keyField={(item) => item.id}
+          getActionIndex={(item) => item.primaryIndex}
           listClassName={styles.providerTableList}
           rowClassName={styles.providerTableRow}
           metaClassName={styles.providerTableMeta}
@@ -82,41 +79,34 @@ export function GeminiSection({
           onEdit={onEdit}
           onDelete={onDelete}
           actionsDisabled={actionsDisabled}
-          getRowDisabled={(item) => hasDisableAllModelsRule(item.excludedModels)}
-          extraActionButtons={(_, index) => (
+          getRowDisabled={(item) => !item.enabled}
+          extraActionButtons={(item) => (
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => onDuplicate(index)}
+              onClick={() => onDuplicate(item.primaryIndex)}
               disabled={actionsDisabled}
               className={styles.providerActionButton}
             >
               {t('common.copy')}
             </Button>
           )}
-          renderExtraActions={(item, index) => (
+          renderExtraActions={(item) => (
             <Button
               variant="secondary"
               size="sm"
               className={`${styles.providerActionButton} ${
-                hasDisableAllModelsRule(item.excludedModels)
-                  ? styles.providerEnableButton
-                  : styles.providerDisableButton
+                item.enabled ? styles.providerDisableButton : styles.providerEnableButton
               }`}
               disabled={toggleDisabled}
-              onClick={() => void onToggle(index, hasDisableAllModelsRule(item.excludedModels))}
+              onClick={() => void onToggle(item.primaryIndex, !item.enabled)}
             >
-              {hasDisableAllModelsRule(item.excludedModels) ? '启用' : '禁用'}
+              {item.enabled ? '禁用' : '启用'}
             </Button>
           )}
           renderContent={(item, index) => {
-            const stats = getStatsBySource(item.apiKey, keyStats, item.prefix);
-            const configDisabled = hasDisableAllModelsRule(item.excludedModels);
+            const card = buildProviderGroupCard(item, keyStats, statusBarBySource);
             const excludedModels = item.excludedModels ?? [];
-            const statusData = lookupStatusBar(
-              statusBarBySource,
-              buildCandidateUsageSourceIds({ apiKey: item.apiKey, prefix: item.prefix })
-            );
             const mappingSummary = summarizeMappings(
               [
                 ...(item.models ?? []).map((model) => ({
@@ -137,6 +127,10 @@ export function GeminiSection({
               endpoint,
               fallback: `${t('ai_providers.gemini_item_title')} #${index + 1}`,
             });
+            const maskedKeys = item.configs
+              .slice(0, 2)
+              .map((config) => maskApiKey(config.apiKey))
+              .join(' / ');
 
             return (
               <Fragment>
@@ -163,17 +157,23 @@ export function GeminiSection({
                   <div className={styles.providerMetricGrid}>
                     <div className={styles.providerStatusStats}>
                       <span className={`${styles.statPill} ${styles.statSuccess}`}>
-                        {t('stats.success')}: {stats.success}
+                        {t('stats.success')}: {card.success}
                       </span>
                       <span className={`${styles.statPill} ${styles.statFailure}`}>
-                        {t('stats.failure')}: {stats.failure}
+                        {t('stats.failure')}: {card.failure}
                       </span>
+                    </div>
+                    <div className={styles.providerStatusMeta}>
+                      {t('common.api_key')}: {card.keyCount}
+                    </div>
+                    <div className={styles.providerStatusMeta}>
+                      {item.enabledCount === 0 ? '禁用' : '启用'}
                     </div>
                   </div>
                 </div>
                 <div className={styles.providerCardBody}>
                   <div className={styles.providerStatusRow}>
-                    <ProviderStatusBar statusData={statusData} />
+                    <ProviderStatusBar statusData={card.statusData} />
                   </div>
                   <div className={styles.providerModelsColumn}>
                     <div className={styles.providerModelList}>
@@ -197,7 +197,8 @@ export function GeminiSection({
                   <div className={styles.providerInfoSummary}>
                     <div className={styles.providerInfoCluster}>
                       <div className={`${styles.providerMetaLine} ${styles.providerMetaKey}`}>
-                        {maskApiKey(item.apiKey)}
+                        {maskedKeys}
+                        {item.configs.length > 2 ? ` +${item.configs.length - 2}` : ''}
                       </div>
                     </div>
                     <div className={styles.providerInfoCluster}>
@@ -206,13 +207,13 @@ export function GeminiSection({
                           {t('common.prefix')}: {item.prefix}
                         </div>
                       )}
-                      {item.proxyUrl && (
+                      {item.proxyUrls[0] && (
                         <div className={styles.providerMetaLine}>
-                          {t('common.proxy_url')}: {formatProviderEndpoint(item.proxyUrl)}
+                          {t('common.proxy_url')}: {formatProviderEndpoint(item.proxyUrls[0])}
                         </div>
                       )}
                     </div>
-                    {configDisabled && (
+                    {!item.enabled && (
                       <div className={styles.providerMetaLine}>
                         {t('ai_providers.config_disabled_badge')}
                       </div>

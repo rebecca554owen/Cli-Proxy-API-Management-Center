@@ -86,6 +86,15 @@ const cloneCloak = (cloak: CloakConfig | undefined) =>
       }
     : undefined;
 
+const countGroupEnabledStates = (configs: Array<ProviderKeyConfig | GeminiKeyConfig>) => {
+  const enabledCount = configs.filter((config) => !hasDisableAllModelsRule(config.excludedModels)).length;
+  return {
+    enabledCount,
+    disabledCount: Math.max(configs.length - enabledCount, 0),
+    enabled: enabledCount > 0,
+  };
+};
+
 export const groupProviderConfigs = (
   provider: GroupedProviderKind,
   configs: ProviderKeyConfig[] | GeminiKeyConfig[]
@@ -101,6 +110,10 @@ export const groupProviderConfigs = (
       existing.proxyUrls = Array.from(
         new Set([...existing.proxyUrls, String(item.proxyUrl ?? '').trim()].filter(Boolean))
       );
+      const counts = countGroupEnabledStates(existing.configs);
+      existing.enabled = counts.enabled;
+      existing.enabledCount = counts.enabledCount;
+      existing.disabledCount = counts.disabledCount;
       return;
     }
 
@@ -109,6 +122,7 @@ export const groupProviderConfigs = (
     const providerConfig = item as ProviderKeyConfig;
     const hasWebsocketsField = Object.prototype.hasOwnProperty.call(item, 'websockets');
     const hasCloakField = Object.prototype.hasOwnProperty.call(item, 'cloak');
+    const counts = countGroupEnabledStates([item]);
     groups.set(key, {
       id: key,
       provider,
@@ -125,7 +139,9 @@ export const groupProviderConfigs = (
       configs: [item],
       indexes: [index],
       primaryIndex: index,
-      enabled: !hasDisableAllModelsRule(item.excludedModels),
+      enabled: counts.enabled,
+      enabledCount: counts.enabledCount,
+      disabledCount: counts.disabledCount,
       proxyUrls: String(item.proxyUrl ?? '').trim() ? [String(item.proxyUrl ?? '').trim()] : [],
       websockets: hasWebsocketsField ? Boolean(providerConfig.websockets) : undefined,
       cloak: hasCloakField ? cloneCloak(providerConfig.cloak) : undefined,

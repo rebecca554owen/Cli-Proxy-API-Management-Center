@@ -23,7 +23,10 @@ export type ProviderKind = 'gemini' | 'codex' | 'claude' | 'openai' | 'vertex';
 
 export type GroupedProviderKind = 'gemini' | 'codex' | 'claude';
 
-export type ProviderSemanticGroup = 'g1-flat-grouped' | 'g2-provider-with-keys' | 'g3-special-compatible';
+export type ProviderSemanticGroup =
+  | 'g1-flat-grouped'
+  | 'g2-provider-with-keys'
+  | 'g3-special-compatible';
 
 export type ProviderActivationStrategy = 'excluded-models-disable-all';
 
@@ -91,6 +94,7 @@ export interface ProviderKeyEntryDraft {
   apiKey: string;
   proxyUrl: string;
   headers: HeaderEntry[];
+  enabled?: boolean;
   testStatus: 'idle' | 'loading' | 'success' | 'error';
   testMessage: string;
 }
@@ -123,6 +127,8 @@ export interface ProviderConfigGroup<TConfig> {
   indexes: number[];
   primaryIndex: number;
   enabled: boolean;
+  enabledCount: number;
+  disabledCount: number;
   proxyUrls: string[];
   websockets?: boolean;
   cloak?: ProviderKeyConfig['cloak'];

@@ -13,6 +13,9 @@ import {
   ProviderGroupEditForm,
   buildProviderGroupEditSignature,
   buildProviderConfigsFromGroupForm,
+  buildProviderGroupFormState,
+  buildNextProviderList,
+  groupProviderConfigs,
   refreshMonitorProviderMeta,
   resolveConnectivityErrorMessage,
   runProviderConnectivityTest,
@@ -25,19 +28,11 @@ import type { ModelInfo } from '@/utils/models';
 import type { ProviderGroupFormState } from '@/components/providers';
 import layoutStyles from './AiProvidersEditLayout.module.scss';
 import styles from './AiProvidersPage.module.scss';
-import {
-  applyCodexSharedFields,
-  buildCodexFormState,
-  canSyncCodexConfigGroup,
-  hasCodexSharedFieldChanges,
-} from './codexConfigUtils';
 
-type LocationState =
-  | {
-      fromAiProviders?: boolean;
-      copyIndex?: number;
-    }
-  | null;
+type LocationState = {
+  fromAiProviders?: boolean;
+  copyIndex?: number;
+} | null;
 
 const buildEmptyForm = (): ProviderGroupFormState => ({
   baseUrl: '',
@@ -49,29 +44,6 @@ const buildEmptyForm = (): ProviderGroupFormState => ({
   testModel: '',
   keyEntries: [{ apiKey: '', proxyUrl: '', headers: [], testStatus: 'idle', testMessage: '' }],
   websockets: false,
-});
-
-const buildSingleForm = (config: ProviderKeyConfig): ProviderGroupFormState => ({
-  baseUrl: config.baseUrl ?? '',
-  prefix: config.prefix ?? '',
-  priority: config.priority,
-  headers: config.headers ? Object.entries(config.headers).map(([key, value]) => ({ key, value })) : [],
-  modelEntries:
-    config.models?.length
-      ? config.models.map((model) => ({ name: model.name ?? '', alias: model.alias ?? '' }))
-      : [{ name: '', alias: '' }],
-  excludedText: Array.isArray(config.excludedModels) ? config.excludedModels.join('\n') : '',
-  testModel: config.models?.[0]?.name ?? '',
-  keyEntries: [
-    {
-      apiKey: config.apiKey ?? '',
-      proxyUrl: config.proxyUrl ?? '',
-      headers: config.headers ? Object.entries(config.headers).map(([key, value]) => ({ key, value })) : [],
-      testStatus: 'idle',
-      testMessage: '',
-    },
-  ],
-  websockets: Boolean(config.websockets),
 });
 
 const parseIndexParam = (value: string | undefined) => {
@@ -92,7 +64,7 @@ export function AiProvidersCodexEditPage() {
   const location = useLocation();
   const params = useParams<{ index?: string }>();
 
-  const { showNotification, showConfirmation } = useNotificationStore();
+  const { showNotification } = useNotificationStore();
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
   const disableControls = connectionStatus !== 'connected';
 
@@ -108,7 +80,9 @@ export function AiProvidersCodexEditPage() {
   const [baselineSignature, setBaselineSignature] = useState(() =>
     buildProviderGroupEditSignature(buildEmptyForm())
   );
-  const [summaryStatus, setSummaryStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [summaryStatus, setSummaryStatus] = useState<'idle' | 'loading' | 'success' | 'error'>(
+    'idle'
+  );
   const [summaryMessage, setSummaryMessage] = useState('');
   const [isTesting, setIsTesting] = useState(false);
   const [streamEnabled, setStreamEnabled] = useState(true);
@@ -126,14 +100,20 @@ export function AiProvidersCodexEditPage() {
   const hasIndexParam = typeof params.index === 'string';
   const editIndex = useMemo(() => parseIndexParam(params.index), [params.index]);
   const invalidIndexParam = hasIndexParam && editIndex === null;
-  const initialConfig = useMemo(
-    () => (editIndex === null ? undefined : configs[editIndex]),
-    [configs, editIndex]
+  const groupedConfigs = useMemo(() => groupProviderConfigs('codex', configs), [configs]);
+  const initialGroup = useMemo(
+    () =>
+      editIndex === null
+        ? undefined
+        : groupedConfigs.find((group) => group.indexes.includes(editIndex)),
+    [editIndex, groupedConfigs]
   );
-  const invalidIndex = editIndex !== null && !initialConfig;
+  const invalidIndex = editIndex !== null && !initialGroup;
 
   const title =
-    editIndex !== null ? t('ai_providers.codex_edit_modal_title') : t('ai_providers.codex_add_modal_title');
+    editIndex !== null
+      ? t('ai_providers.codex_edit_modal_title')
+      : t('ai_providers.codex_add_modal_title');
 
   const handleBack = useCallback(() => {
     const state = location.state as LocationState;
@@ -184,17 +164,26 @@ export function AiProvidersCodexEditPage() {
   useEffect(() => {
     if (loading) return;
     const locationState = location.state as LocationState;
-    if (initialConfig) {
-      const nextForm = buildSingleForm(initialConfig);
+    if (initialGroup) {
+      const nextForm = buildProviderGroupFormState(initialGroup);
       setForm(nextForm);
       setBaselineSignature(buildProviderGroupEditSignature(nextForm));
       return;
     }
     if (editIndex === null && typeof locationState?.copyIndex === 'number') {
-      const copySource = configs[locationState.copyIndex];
-      if (copySource) {
-        const nextForm = buildSingleForm(copySource);
-        nextForm.keyEntries = [{ ...nextForm.keyEntries[0], apiKey: '', testStatus: 'idle', testMessage: '' }];
+      const copyGroup = groupedConfigs.find((group) =>
+        group.indexes.includes(locationState.copyIndex!)
+      );
+      if (copyGroup) {
+        const nextForm = buildProviderGroupFormState(copyGroup);
+        nextForm.keyEntries = nextForm.keyEntries.map(() => ({
+          apiKey: '',
+          proxyUrl: '',
+          headers: [],
+          enabled: true,
+          testStatus: 'idle' as const,
+          testMessage: '',
+        }));
         setForm(nextForm);
         setBaselineSignature(buildProviderGroupEditSignature(nextForm));
         return;
@@ -203,7 +192,7 @@ export function AiProvidersCodexEditPage() {
     const nextForm = buildEmptyForm();
     setForm(nextForm);
     setBaselineSignature(buildProviderGroupEditSignature(nextForm));
-  }, [configs, editIndex, initialConfig, loading, location.state]);
+  }, [editIndex, groupedConfigs, initialGroup, loading, location.state]);
 
   const currentSignature = useMemo(() => buildProviderGroupEditSignature(form), [form]);
   const isDirty = baselineSignature !== currentSignature;
@@ -272,7 +261,10 @@ export function AiProvidersCodexEditPage() {
         };
       });
       if (addedCount > 0) {
-        showNotification(t('ai_providers.codex_models_fetch_added', { count: addedCount }), 'success');
+        showNotification(
+          t('ai_providers.codex_models_fetch_added', { count: addedCount }),
+          'success'
+        );
       }
     },
     [showNotification, t]
@@ -287,7 +279,8 @@ export function AiProvidersCodexEditPage() {
       const hasCustomAuthorization = Object.keys(headerObject).some(
         (key) => key.toLowerCase() === 'authorization'
       );
-      const apiKey = form.keyEntries.find((entry) => entry.apiKey.trim())?.apiKey.trim() || undefined;
+      const apiKey =
+        form.keyEntries.find((entry) => entry.apiKey.trim())?.apiKey.trim() || undefined;
       const list = await modelsApi.fetchV1ModelsViaApiCall(
         form.baseUrl ?? '',
         hasCustomAuthorization ? undefined : apiKey,
@@ -298,7 +291,9 @@ export function AiProvidersCodexEditPage() {
     } catch (err: unknown) {
       if (modelDiscoveryRequestIdRef.current !== requestId) return;
       setDiscoveredModels([]);
-      setModelDiscoveryError(`${t('ai_providers.codex_models_fetch_error')}: ${getErrorMessage(err)}`);
+      setModelDiscoveryError(
+        `${t('ai_providers.codex_models_fetch_error')}: ${getErrorMessage(err)}`
+      );
     } finally {
       if (modelDiscoveryRequestIdRef.current === requestId) {
         setModelDiscoveryFetching(false);
@@ -349,7 +344,9 @@ export function AiProvidersCodexEditPage() {
   };
 
   const handleApplyDiscoveredModels = () => {
-    const selectedModels = discoveredModels.filter((model) => modelDiscoverySelected.has(model.name));
+    const selectedModels = discoveredModels.filter((model) =>
+      modelDiscoverySelected.has(model.name)
+    );
     if (selectedModels.length) {
       mergeDiscoveredModels(selectedModels);
     }
@@ -371,7 +368,8 @@ export function AiProvidersCodexEditPage() {
 
   const runSingleKeyTest = useCallback(
     async (keyIndex: number): Promise<boolean> => {
-      const modelName = form.testModel.trim() || form.modelEntries.find((entry) => entry.name.trim())?.name || '';
+      const modelName =
+        form.testModel.trim() || form.modelEntries.find((entry) => entry.name.trim())?.name || '';
       if (!form.baseUrl.trim()) {
         const message = t('notification.codex_base_url_required');
         setSummaryStatus('error');
@@ -425,7 +423,16 @@ export function AiProvidersCodexEditPage() {
         return false;
       }
     },
-    [form.baseUrl, form.headers, form.keyEntries, form.modelEntries, form.testModel, showNotification, streamEnabled, t]
+    [
+      form.baseUrl,
+      form.headers,
+      form.keyEntries,
+      form.modelEntries,
+      form.testModel,
+      showNotification,
+      streamEnabled,
+      t,
+    ]
   );
 
   const testOne = useCallback(
@@ -503,70 +510,42 @@ export function AiProvidersCodexEditPage() {
       showNotification(t('notification.codex_test_key_required'), 'error');
       return;
     }
-    const nextPayload = payloads[0];
-    const performSave = async (syncGroup: boolean) => {
-      setSaving(true);
-      setError('');
-      try {
-        const nextList =
-          editIndex !== null
-            ? configs.map((item, index) => {
-                if (index === editIndex) return nextPayload;
-                if (syncGroup && canSyncCodexConfigGroup(item, configs[editIndex])) {
-                  return applyCodexSharedFields(item, nextPayload);
-                }
-                return item;
-              })
-            : [...configs, nextPayload];
 
-        await providersApi.saveCodexConfigs(nextList);
-        setConfigs(nextList);
-        updateConfigValue('codex-api-key', nextList);
-        clearCache('codex-api-key');
-        await refreshMonitorProviderMeta();
-        showNotification(
-          editIndex !== null ? t('notification.codex_config_updated') : t('notification.codex_config_added'),
-          'success'
-        );
-        allowNextNavigation();
-        setBaselineSignature(buildProviderGroupEditSignature(form));
-        handleBack();
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : '';
-        setError(message);
-        showNotification(`${t('notification.update_failed')}: ${message}`, 'error');
-      } finally {
-        setSaving(false);
-      }
-    };
+    setSaving(true);
+    setError('');
+    try {
+      const locationState = location.state as LocationState;
+      const copyGroup =
+        editIndex === null && typeof locationState?.copyIndex === 'number'
+          ? groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!))
+          : undefined;
 
-    const currentConfig = editIndex !== null ? configs[editIndex] : undefined;
-    const siblingCount =
-      currentConfig && editIndex !== null
-        ? configs.filter((item, index) => index !== editIndex && canSyncCodexConfigGroup(item, currentConfig)).length
-        : 0;
-    const shouldPromptSync =
-      Boolean(currentConfig) &&
-      siblingCount > 0 &&
-      hasCodexSharedFieldChanges(buildCodexFormState(currentConfig!), buildCodexFormState(nextPayload));
-
-    if (shouldPromptSync) {
-      showConfirmation({
-        title: '同步相同上游配置',
-        message: `检测到还有 ${siblingCount} 个相同 baseUrl + prefix 的 Codex key。是否将模型映射、代理、请求头、优先级等共享配置同步到这些 key？`,
-        confirmText: '同步保存',
-        cancelText: '仅保存当前',
-        onConfirm: async () => {
-          await performSave(true);
-        },
-        onCancel: () => {
-          void performSave(false);
-        },
+      const nextList = buildNextProviderList(configs, payloads, {
+        indexes: initialGroup?.indexes,
+        copyIndexes: copyGroup?.indexes,
       });
-      return;
-    }
 
-    await performSave(false);
+      await providersApi.saveCodexConfigs(nextList);
+      setConfigs(nextList);
+      updateConfigValue('codex-api-key', nextList);
+      clearCache('codex-api-key');
+      await refreshMonitorProviderMeta();
+      showNotification(
+        editIndex !== null
+          ? t('notification.codex_config_updated')
+          : t('notification.codex_config_added'),
+        'success'
+      );
+      allowNextNavigation();
+      setBaselineSignature(buildProviderGroupEditSignature(form));
+      handleBack();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '';
+      setError(message);
+      showNotification(`${t('notification.update_failed')}: ${message}`, 'error');
+    } finally {
+      setSaving(false);
+    }
   }, [
     allowNextNavigation,
     clearCache,
@@ -574,18 +553,21 @@ export function AiProvidersCodexEditPage() {
     disableControls,
     editIndex,
     form,
+    groupedConfigs,
     handleBack,
+    initialGroup,
     invalidIndex,
     invalidIndexParam,
     loading,
+    location.state,
     saving,
-    showConfirmation,
     showNotification,
     t,
     updateConfigValue,
   ]);
 
-  const canSave = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex && !isTesting;
+  const canSave =
+    !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex && !isTesting;
 
   return (
     <SecondaryScreenShell
@@ -649,7 +631,6 @@ export function AiProvidersCodexEditPage() {
                 setStreamEnabled(value);
                 resetConnectivityState();
               }}
-              singleEntryMode
               renderExtraFields={
                 <div className="form-group">
                   <label>{t('ai_providers.codex_websockets_label')}</label>
@@ -693,7 +674,9 @@ export function AiProvidersCodexEditPage() {
               }
             >
               <div className={styles.openaiModelsContent}>
-                <div className={styles.sectionHint}>{t('ai_providers.codex_models_fetch_hint')}</div>
+                <div className={styles.sectionHint}>
+                  {t('ai_providers.codex_models_fetch_hint')}
+                </div>
                 <div className={styles.openaiModelsEndpointSection}>
                   <label className={styles.openaiModelsEndpointLabel}>
                     {t('ai_providers.codex_models_fetch_url_label')}
@@ -724,11 +707,17 @@ export function AiProvidersCodexEditPage() {
                 />
                 {modelDiscoveryError && <div className="error-box">{modelDiscoveryError}</div>}
                 {modelDiscoveryFetching ? (
-                  <div className={styles.sectionHint}>{t('ai_providers.codex_models_fetch_loading')}</div>
+                  <div className={styles.sectionHint}>
+                    {t('ai_providers.codex_models_fetch_loading')}
+                  </div>
                 ) : discoveredModels.length === 0 ? (
-                  <div className={styles.sectionHint}>{t('ai_providers.codex_models_fetch_empty')}</div>
+                  <div className={styles.sectionHint}>
+                    {t('ai_providers.codex_models_fetch_empty')}
+                  </div>
                 ) : discoveredModelsFiltered.length === 0 ? (
-                  <div className={styles.sectionHint}>{t('ai_providers.codex_models_search_empty')}</div>
+                  <div className={styles.sectionHint}>
+                    {t('ai_providers.codex_models_search_empty')}
+                  </div>
                 ) : (
                   <div className={styles.modelDiscoveryList}>
                     {discoveredModelsFiltered.map((model) => {

@@ -9,8 +9,12 @@ import type { KeyStats, StatusBarData } from '@/utils/usage';
 import styles from '@/pages/AiProvidersPage.module.scss';
 import { ProviderList } from '../ProviderList';
 import { ProviderStatusBar } from '../ProviderStatusBar';
-import { buildProviderIdentityPresentation, formatProviderEndpoint, getStatsBySource, hasDisableAllModelsRule } from '../utils';
-import { buildCandidateUsageSourceIds, lookupStatusBar } from '@/utils/usage';
+import {
+  buildProviderIdentityPresentation,
+  formatProviderEndpoint,
+} from '../utils';
+import { buildProviderGroupCard, groupProviderConfigs } from '../groupedProviderUtils';
+import type { ProviderConfigGroup } from '../types';
 
 interface CodexSectionProps {
   configs: ProviderKeyConfig[];
@@ -41,6 +45,7 @@ export function CodexSection({
 }: CodexSectionProps) {
   const { t } = useTranslation();
   const actionsDisabled = disableControls || loading || isSwitching;
+  const groups = groupProviderConfigs('codex', configs);
 
   return (
     <Card
@@ -56,10 +61,11 @@ export function CodexSection({
         </Button>
       }
     >
-      <ProviderList<ProviderKeyConfig>
-        items={configs}
+      <ProviderList<ProviderConfigGroup<ProviderKeyConfig>>
+        items={groups}
         loading={loading}
-        keyField={(item, index) => `${item.apiKey}-${index}`}
+        keyField={(item) => item.id}
+        getActionIndex={(item) => item.primaryIndex}
         listClassName={styles.providerTableList}
         rowClassName={styles.providerTableRow}
         metaClassName={styles.providerTableMeta}
@@ -70,39 +76,33 @@ export function CodexSection({
         onEdit={onEdit}
         onDelete={onDelete}
         actionsDisabled={actionsDisabled}
-        getRowDisabled={(item) => hasDisableAllModelsRule(item.excludedModels)}
-        extraActionButtons={(_, index) => (
+        getRowDisabled={(item) => !item.enabled}
+        extraActionButtons={(item) => (
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => onDuplicate(index)}
+            onClick={() => onDuplicate(item.primaryIndex)}
             disabled={actionsDisabled}
             className={styles.providerActionButton}
           >
             {t('common.copy')}
           </Button>
         )}
-        renderExtraActions={(item, index) => (
+        renderExtraActions={(item) => (
           <Button
             variant="secondary"
             size="sm"
             className={`${styles.providerActionButton} ${
-              hasDisableAllModelsRule(item.excludedModels)
-                ? styles.providerEnableButton
-                : styles.providerDisableButton
+              item.enabled ? styles.providerDisableButton : styles.providerEnableButton
             }`}
             disabled={actionsDisabled}
-            onClick={() => void onToggle(index, hasDisableAllModelsRule(item.excludedModels))}
+            onClick={() => void onToggle(item.primaryIndex, !item.enabled)}
           >
-            {hasDisableAllModelsRule(item.excludedModels) ? '启用' : '禁用'}
+            {item.enabled ? '禁用' : '启用'}
           </Button>
         )}
         renderContent={(item, index) => {
-          const stats = getStatsBySource(item.apiKey, keyStats, item.prefix);
-          const statusData = lookupStatusBar(
-            statusBarBySource,
-            buildCandidateUsageSourceIds({ apiKey: item.apiKey, prefix: item.prefix })
-          );
+          const card = buildProviderGroupCard(item, keyStats, statusBarBySource);
           const excludedModels = item.excludedModels ?? [];
           const mappings: Array<{ source: string; target: string; muted?: boolean }> = [
             ...(item.models ?? []).map((model) => ({
@@ -115,13 +115,16 @@ export function CodexSection({
               muted: true,
             })),
           ];
-          const proxySummary = item.proxyUrl ? formatProviderEndpoint(item.proxyUrl) : '';
+          const proxySummary = item.proxyUrls[0] ? formatProviderEndpoint(item.proxyUrls[0]) : '';
           const identity = buildProviderIdentityPresentation({
             primary: item.prefix,
             endpoint: formatProviderEndpoint(item.baseUrl),
             fallback: `${t('ai_providers.codex_item_title')} #${index + 1}`,
           });
-          const configDisabled = hasDisableAllModelsRule(item.excludedModels);
+          const maskedKeys = item.configs
+            .slice(0, 2)
+            .map((config) => maskApiKey(config.apiKey))
+            .join(' / ');
 
           return (
             <Fragment>
@@ -143,14 +146,17 @@ export function CodexSection({
                 <div className={styles.providerMetricGrid}>
                   <div className={styles.providerStatusStats}>
                     <span className={`${styles.statPill} ${styles.statSuccess}`}>
-                      {t('stats.success')}: {stats.success}
+                      {t('stats.success')}: {card.success}
                     </span>
                     <span className={`${styles.statPill} ${styles.statFailure}`}>
-                      {t('stats.failure')}: {stats.failure}
+                      {t('stats.failure')}: {card.failure}
                     </span>
                   </div>
                   <div className={styles.providerStatusMeta}>
-                    {t('common.api_key')}: 1
+                    {t('common.api_key')}: {card.keyCount}
+                  </div>
+                  <div className={styles.providerStatusMeta}>
+                    {item.enabledCount === 0 ? '禁用' : '启用'}
                   </div>
                   <div className={styles.providerStatusMeta}>
                     {t('ai_providers.codex_websockets_label')}: {item.websockets ? t('common.yes') : t('common.no')}
@@ -159,7 +165,7 @@ export function CodexSection({
               </div>
               <div className={styles.providerCardBody}>
                 <div className={styles.providerStatusRow}>
-                  <ProviderStatusBar statusData={statusData} />
+                  <ProviderStatusBar statusData={card.statusData} />
                 </div>
                 <div className={styles.providerModelsColumn}>
                   <div className={styles.providerModelList}>
@@ -178,7 +184,8 @@ export function CodexSection({
                 <div className={styles.providerInfoSummary}>
                   <div className={styles.providerInfoCluster}>
                     <div className={`${styles.providerMetaLine} ${styles.providerMetaKey}`}>
-                      {maskApiKey(item.apiKey)}
+                      {maskedKeys}
+                      {item.configs.length > 2 ? ` +${item.configs.length - 2}` : ''}
                     </div>
                     {proxySummary && (
                       <div className={styles.providerMetaLine}>
@@ -186,7 +193,7 @@ export function CodexSection({
                       </div>
                     )}
                   </div>
-                  {configDisabled && (
+                  {!item.enabled && (
                     <div className={styles.providerMetaLine}>
                       {t('ai_providers.config_disabled_badge')}
                     </div>

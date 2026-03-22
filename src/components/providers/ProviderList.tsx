@@ -8,6 +8,7 @@ interface ProviderListProps<T> {
   loading: boolean;
   keyField: (item: T, index: number) => string;
   renderContent: (item: T, index: number) => ReactNode;
+  getActionIndex?: (item: T, index: number) => number;
   onEdit: (index: number) => void;
   onDelete: (index: number) => void;
   emptyTitle: string;
@@ -30,6 +31,7 @@ export function ProviderList<T>({
   loading,
   keyField,
   renderContent,
+  getActionIndex,
   onEdit,
   onDelete,
   emptyTitle,
@@ -61,12 +63,13 @@ export function ProviderList<T>({
       {header}
       {items.map((item, index) => {
         const rowDisabled = getRowDisabled ? getRowDisabled(item, index) : false;
+        const actionIndex = getActionIndex ? getActionIndex(item, index) : index;
         const actionNodes = [
           <Button
             key="edit"
             variant="secondary"
             size="sm"
-            onClick={() => onEdit(index)}
+            onClick={() => onEdit(actionIndex)}
             disabled={actionsDisabled}
             className={actionButtonClassName}
           >
@@ -78,7 +81,7 @@ export function ProviderList<T>({
             key="delete"
             variant="danger"
             size="sm"
-            onClick={() => onDelete(index)}
+            onClick={() => onDelete(actionIndex)}
             disabled={actionsDisabled}
             className={actionButtonClassName}
           >

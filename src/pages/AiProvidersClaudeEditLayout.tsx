@@ -4,20 +4,22 @@ import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import { providersApi } from '@/services/api';
-import { useAuthStore, useClaudeEditDraftStore, useConfigStore, useNotificationStore } from '@/stores';
+import {
+  useAuthStore,
+  useClaudeEditDraftStore,
+  useConfigStore,
+  useNotificationStore,
+} from '@/stores';
 import type { ProviderKeyConfig } from '@/types';
 import type { ModelInfo } from '@/utils/models';
 import {
   buildProviderConfigsFromGroupForm,
   buildProviderGroupEditSignature,
+  buildProviderGroupFormState,
+  buildNextProviderList,
+  groupProviderConfigs,
   type ProviderGroupFormState,
 } from '@/components/providers';
-import {
-  applyClaudeSharedFields,
-  buildClaudeFormState,
-  canSyncClaudeConfigGroup,
-  hasClaudeSharedFieldChanges,
-} from './claudeConfigUtils';
 
 type LocationState = {
   fromAiProviders?: boolean;
@@ -73,43 +75,11 @@ const buildEmptyForm = (): ProviderGroupFormState => ({
   cloak: undefined,
 });
 
-const toHeaderEntries = (headers?: Record<string, string>) =>
-  headers ? Object.entries(headers).map(([key, value]) => ({ key, value })) : [];
-
-const buildSingleForm = (config: ProviderKeyConfig): ProviderGroupFormState => ({
-  priority: config.priority,
-  prefix: config.prefix ?? '',
-  baseUrl: config.baseUrl ?? '',
-  headers: toHeaderEntries(config.headers),
-  excludedText: Array.isArray(config.excludedModels) ? config.excludedModels.join('\n') : '',
-  testModel: config.models?.[0]?.name ?? '',
-  modelEntries:
-    config.models?.length
-      ? config.models.map((model) => ({ name: model.name ?? '', alias: model.alias ?? '' }))
-      : [{ name: '', alias: '' }],
-  keyEntries: [
-    {
-      apiKey: config.apiKey ?? '',
-      proxyUrl: config.proxyUrl ?? '',
-      headers: toHeaderEntries(config.headers),
-      testStatus: 'idle',
-      testMessage: '',
-    },
-  ],
-  cloak: config.cloak
-    ? {
-        mode: config.cloak.mode,
-        strictMode: config.cloak.strictMode,
-        sensitiveWords: config.cloak.sensitiveWords ? [...config.cloak.sensitiveWords] : undefined,
-      }
-    : undefined,
-});
-
 export function AiProvidersClaudeEditLayout() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const { showNotification, showConfirmation } = useNotificationStore();
+  const { showNotification } = useNotificationStore();
 
   const params = useParams<{ index?: string }>();
   const hasIndexParam = typeof params.index === 'string';
@@ -131,15 +101,21 @@ export function AiProvidersClaudeEditLayout() {
 
   const draftKey = useMemo(() => {
     if (invalidIndexParam) return `claude:invalid:${params.index ?? 'unknown'}`;
+    const locationState = location.state as LocationState;
+    if (editIndex === null && typeof locationState?.copyIndex === 'number') {
+      return `claude:new:copy:${locationState.copyIndex}:${location.key}`;
+    }
     if (editIndex === null) return 'claude:new';
     return `claude:${editIndex}`;
-  }, [editIndex, invalidIndexParam, params.index]);
+  }, [editIndex, invalidIndexParam, location.key, location.state, params.index]);
 
   const draft = useClaudeEditDraftStore((state) => state.drafts[draftKey]);
   const acquireDraft = useClaudeEditDraftStore((state) => state.acquireDraft);
   const releaseDraft = useClaudeEditDraftStore((state) => state.releaseDraft);
   const initDraft = useClaudeEditDraftStore((state) => state.initDraft);
-  const setDraftBaselineSignature = useClaudeEditDraftStore((state) => state.setDraftBaselineSignature);
+  const setDraftBaselineSignature = useClaudeEditDraftStore(
+    (state) => state.setDraftBaselineSignature
+  );
   const setDraftForm = useClaudeEditDraftStore((state) => state.setDraftForm);
   const setDraftTestModel = useClaudeEditDraftStore((state) => state.setDraftTestModel);
   const setDraftTestStatus = useClaudeEditDraftStore((state) => state.setDraftTestStatus);
@@ -178,12 +154,16 @@ export function AiProvidersClaudeEditLayout() {
     [draftKey, setDraftTestMessage]
   );
 
-  const initialConfig = useMemo(() => {
-    if (editIndex === null) return undefined;
-    return configs[editIndex];
-  }, [configs, editIndex]);
+  const groupedConfigs = useMemo(() => groupProviderConfigs('claude', configs), [configs]);
+  const initialGroup = useMemo(
+    () =>
+      editIndex === null
+        ? undefined
+        : groupedConfigs.find((group) => group.indexes.includes(editIndex)),
+    [editIndex, groupedConfigs]
+  );
 
-  const invalidIndex = editIndex !== null && !initialConfig;
+  const invalidIndex = editIndex !== null && !initialGroup;
 
   const availableModels = useMemo(
     () => form.modelEntries.map((entry) => entry.name.trim()).filter(Boolean),
@@ -245,8 +225,8 @@ export function AiProvidersClaudeEditLayout() {
     if (loading) return;
     if (draft?.initialized) return;
 
-    if (initialConfig) {
-      const seededForm = buildSingleForm(initialConfig);
+    if (initialGroup) {
+      const seededForm = buildProviderGroupFormState(initialGroup);
       const baselineSignature = buildProviderGroupEditSignature(seededForm);
       initDraft(draftKey, {
         baselineSignature,
@@ -260,10 +240,19 @@ export function AiProvidersClaudeEditLayout() {
 
     const locationState = location.state as LocationState;
     if (editIndex === null && typeof locationState?.copyIndex === 'number') {
-      const copySource = configs[locationState.copyIndex];
-      if (copySource) {
-        const copiedForm = buildSingleForm(copySource);
-        copiedForm.keyEntries = [{ ...copiedForm.keyEntries[0], apiKey: '', testStatus: 'idle', testMessage: '' }];
+      const copyGroup = groupedConfigs.find((group) =>
+        group.indexes.includes(locationState.copyIndex!)
+      );
+      if (copyGroup) {
+        const copiedForm = buildProviderGroupFormState(copyGroup);
+        copiedForm.keyEntries = copiedForm.keyEntries.map(() => ({
+          apiKey: '',
+          proxyUrl: '',
+          headers: [],
+          enabled: true,
+          testStatus: 'idle' as const,
+          testMessage: '',
+        }));
         initDraft(draftKey, {
           baselineSignature: buildProviderGroupEditSignature(copiedForm),
           form: copiedForm,
@@ -283,7 +272,16 @@ export function AiProvidersClaudeEditLayout() {
       testStatus: 'idle',
       testMessage: '',
     });
-  }, [configs, draft?.initialized, draftKey, editIndex, initDraft, initialConfig, loading, location.state]);
+  }, [
+    draft?.initialized,
+    draftKey,
+    editIndex,
+    groupedConfigs,
+    initDraft,
+    initialGroup,
+    loading,
+    location.state,
+  ]);
 
   const resolvedLoading = !draft?.initialized;
   const currentSignature = useMemo(() => buildProviderGroupEditSignature(form), [form]);
@@ -301,8 +299,7 @@ export function AiProvidersClaudeEditLayout() {
     enabled: canGuard,
     shouldBlock: ({ nextLocation }) => {
       const nextPath = nextLocation.pathname;
-      const isWithinRoot =
-        nextPath === editorRootPath || nextPath.startsWith(`${editorRootPath}/`);
+      const isWithinRoot = nextPath === editorRootPath || nextPath.startsWith(`${editorRootPath}/`);
       return isDirty && !isWithinRoot;
     },
     dialog: {
@@ -361,7 +358,10 @@ export function AiProvidersClaudeEditLayout() {
       });
 
       if (addedCount > 0) {
-        showNotification(t('ai_providers.claude_models_fetch_added', { count: addedCount }), 'success');
+        showNotification(
+          t('ai_providers.claude_models_fetch_added', { count: addedCount }),
+          'success'
+        );
       }
     },
     [setForm, showNotification, t]
@@ -377,74 +377,44 @@ export function AiProvidersClaudeEditLayout() {
       showNotification(t('ai_providers.claude_test_key_required'), 'error');
       return;
     }
-    const nextPayload = payloads[0];
-    const performSave = async (syncGroup: boolean) => {
-      setSaving(true);
-      try {
-        const nextList =
-          editIndex !== null
-            ? configs.map((item, index) => {
-                if (index === editIndex) return nextPayload;
-                if (syncGroup && canSyncClaudeConfigGroup(item, configs[editIndex])) {
-                  return applyClaudeSharedFields(item, nextPayload);
-                }
-                return item;
-              })
-            : [...configs, nextPayload];
 
-        await providersApi.saveClaudeConfigs(nextList);
-        setConfigs(nextList);
-        updateConfigValue('claude-api-key', nextList);
-        clearCache('claude-api-key');
-        showNotification(
-          editIndex !== null
-            ? t('notification.claude_config_updated')
-            : t('notification.claude_config_added'),
-          'success'
-        );
-        allowNextNavigation();
-        setDraftBaselineSignature(draftKey, buildProviderGroupEditSignature(form));
-        navigate('/ai-providers', {
-          replace: true,
-          state: {
-            fromClaudeSave: true,
-            updatedClaudeConfigs: nextList,
-          },
-        });
-      } catch (err: unknown) {
-        showNotification(`${t('notification.update_failed')}: ${getErrorMessage(err)}`, 'error');
-      } finally {
-        setSaving(false);
-      }
-    };
+    setSaving(true);
+    try {
+      const locationState = location.state as LocationState;
+      const copyGroup =
+        editIndex === null && typeof locationState?.copyIndex === 'number'
+          ? groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!))
+          : undefined;
 
-    const currentConfig = editIndex !== null ? configs[editIndex] : undefined;
-    const siblingCount =
-      currentConfig && editIndex !== null
-        ? configs.filter((item, index) => index !== editIndex && canSyncClaudeConfigGroup(item, currentConfig)).length
-        : 0;
-    const shouldPromptSync =
-      Boolean(currentConfig) &&
-      siblingCount > 0 &&
-      hasClaudeSharedFieldChanges(buildClaudeFormState(currentConfig!), buildClaudeFormState(nextPayload));
+      const nextList = buildNextProviderList(configs, payloads, {
+        indexes: initialGroup?.indexes,
+        copyIndexes: copyGroup?.indexes,
+      });
 
-    if (shouldPromptSync) {
-      showConfirmation({
-        title: '同步相同上游配置',
-        message: `检测到还有 ${siblingCount} 个相同 baseUrl + prefix 的 Claude key。是否将模型映射、代理、请求头、优先级等共享配置同步到这些 key？`,
-        confirmText: '同步保存',
-        cancelText: '仅保存当前',
-        onConfirm: async () => {
-          await performSave(true);
-        },
-        onCancel: () => {
-          void performSave(false);
+      await providersApi.saveClaudeConfigs(nextList);
+      setConfigs(nextList);
+      updateConfigValue('claude-api-key', nextList);
+      clearCache('claude-api-key');
+      showNotification(
+        editIndex !== null
+          ? t('notification.claude_config_updated')
+          : t('notification.claude_config_added'),
+        'success'
+      );
+      allowNextNavigation();
+      setDraftBaselineSignature(draftKey, buildProviderGroupEditSignature(form));
+      navigate('/ai-providers', {
+        replace: true,
+        state: {
+          fromClaudeSave: true,
+          updatedClaudeConfigs: nextList,
         },
       });
-      return;
+    } catch (err: unknown) {
+      showNotification(`${t('notification.update_failed')}: ${getErrorMessage(err)}`, 'error');
+    } finally {
+      setSaving(false);
     }
-
-    await performSave(false);
   }, [
     allowNextNavigation,
     clearCache,
@@ -453,13 +423,15 @@ export function AiProvidersClaudeEditLayout() {
     disableControls,
     editIndex,
     form,
+    groupedConfigs,
+    initialGroup,
     invalidIndex,
     invalidIndexParam,
+    location.state,
     navigate,
     resolvedLoading,
     saving,
     setDraftBaselineSignature,
-    showConfirmation,
     showNotification,
     t,
     updateConfigValue,
@@ -467,27 +439,29 @@ export function AiProvidersClaudeEditLayout() {
 
   return (
     <Outlet
-      context={{
-        hasIndexParam,
-        editIndex,
-        invalidIndexParam,
-        invalidIndex,
-        disableControls,
-        loading: resolvedLoading,
-        saving,
-        form,
-        setForm,
-        testModel,
-        setTestModel,
-        testStatus,
-        setTestStatus,
-        testMessage,
-        setTestMessage,
-        availableModels,
-        handleBack,
-        handleSave,
-        mergeDiscoveredModels,
-      } satisfies ClaudeEditOutletContext}
+      context={
+        {
+          hasIndexParam,
+          editIndex,
+          invalidIndexParam,
+          invalidIndex,
+          disableControls,
+          loading: resolvedLoading,
+          saving,
+          form,
+          setForm,
+          testModel,
+          setTestModel,
+          testStatus,
+          setTestStatus,
+          testMessage,
+          setTestMessage,
+          availableModels,
+          handleBack,
+          handleSave,
+          mergeDiscoveredModels,
+        } satisfies ClaudeEditOutletContext
+      }
     />
   );
 }

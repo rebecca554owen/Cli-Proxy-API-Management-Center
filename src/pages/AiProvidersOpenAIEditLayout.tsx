@@ -69,10 +69,10 @@ const buildCopyForm = (source: OpenAIProviderConfig): OpenAIFormState => ({
   headers: headersToEntries(source.headers),
   excludedText: excludedModelsToText(source.excludedModels),
   apiKeyEntries: source.apiKeyEntries?.length
-    ? source.apiKeyEntries.map((entry) => ({
+    ? source.apiKeyEntries.map(() => ({
         apiKey: '',
-        proxyUrl: entry.proxyUrl ?? '',
-        headers: entry.headers,
+        proxyUrl: '',
+        headers: {},
       }))
     : [buildApiKeyEntry()],
   modelEntries: modelsToEntries(source.models),
@@ -173,9 +173,13 @@ export function AiProvidersOpenAIEditLayout() {
 
   const draftKey = useMemo(() => {
     if (invalidIndexParam) return `openai:invalid:${params.index ?? 'unknown'}`;
+    const state = location.state as LocationState;
+    if (editIndex === null && state?.copySource && typeof state.copyIndex === 'number') {
+      return `openai:new:copy:${state.copyIndex}:${location.key}`;
+    }
     if (editIndex === null) return 'openai:new';
     return `openai:${editIndex}`;
-  }, [editIndex, invalidIndexParam, params.index]);
+  }, [editIndex, invalidIndexParam, location.key, location.state, params.index]);
 
   const draft = useOpenAIEditDraftStore((state) => state.drafts[draftKey]);
   const acquireDraft = useOpenAIEditDraftStore((state) => state.acquireDraft);

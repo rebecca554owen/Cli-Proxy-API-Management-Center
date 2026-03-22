@@ -183,10 +183,12 @@ export function AiProvidersGeminiEditPage() {
       const copyGroup = groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!));
       if (copyGroup) {
         const nextForm = normalizeGeminiGroupForm(buildProviderGroupFormState(copyGroup));
-        nextForm.keyEntries = nextForm.keyEntries.map((entry) => ({
-          ...entry,
+        nextForm.keyEntries = nextForm.keyEntries.map(() => ({
           apiKey: '',
-          testStatus: 'idle',
+          proxyUrl: '',
+          headers: [],
+          enabled: true,
+          testStatus: 'idle' as const,
           testMessage: '',
         }));
         setForm(nextForm);
