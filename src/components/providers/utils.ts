@@ -63,13 +63,19 @@ export const buildOpenAIModelsEndpoint = (baseUrl: string): string => {
   return `${trimmed}/models`;
 };
 
+const stripOpenAIEndpointSuffix = (baseUrl: string): string =>
+  baseUrl.replace(/\/(?:chat\/completions|responses)\/?$/i, '');
+
 export const buildOpenAIChatCompletionsEndpoint = (baseUrl: string): string => {
-  const trimmed = normalizeOpenAIBaseUrl(baseUrl);
+  const trimmed = stripOpenAIEndpointSuffix(normalizeOpenAIBaseUrl(baseUrl));
   if (!trimmed) return '';
-  if (trimmed.endsWith('/chat/completions')) {
-    return trimmed;
-  }
   return `${trimmed}/chat/completions`;
+};
+
+export const buildOpenAIResponsesEndpoint = (baseUrl: string): string => {
+  const trimmed = stripOpenAIEndpointSuffix(normalizeOpenAIBaseUrl(baseUrl));
+  if (!trimmed) return '';
+  return `${trimmed}/responses`;
 };
 
 export const buildClaudeMessagesEndpoint = (baseUrl: string): string => {

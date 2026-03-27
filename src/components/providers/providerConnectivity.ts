@@ -3,6 +3,7 @@ import { buildHeaderObject } from '@/utils/headers';
 import {
   buildClaudeMessagesEndpoint,
   buildOpenAIChatCompletionsEndpoint,
+  buildOpenAIResponsesEndpoint,
   normalizeOpenAIBaseUrl,
 } from './utils';
 import type { HeaderEntry } from '@/utils/headers';
@@ -17,6 +18,12 @@ type ProviderConnectivityAuthInput = {
   headers?: HeaderInput;
   keyHeaders?: HeaderInput;
   apiKey?: string;
+};
+
+type OpenAIStyleConnectivityRequest = {
+  endpoint: string;
+  data: string;
+  invalidEndpointMessage: string;
 };
 
 const getErrorMessage = (err: unknown) => {
@@ -64,6 +71,37 @@ const buildGeminiGenerateEndpoint = (baseUrl: string, model: string) => {
   const normalizedModel = String(model ?? '').trim().replace(/^\/?models\//i, '');
   if (!normalizedModel) return '';
   return `${trimmed}/v1beta/models/${normalizedModel}:streamGenerateContent?alt=sse`;
+};
+
+export const buildOpenAIStyleConnectivityRequest = (input: {
+  provider: ProviderKind;
+  baseUrl: string;
+  testModel: string;
+  stream: boolean;
+}): OpenAIStyleConnectivityRequest => {
+  if (input.provider === 'codex') {
+    return {
+      endpoint: buildOpenAIResponsesEndpoint(normalizeOpenAIBaseUrl(input.baseUrl)),
+      data: JSON.stringify({
+        model: input.testModel,
+        input: 'Hi',
+        stream: input.stream,
+        max_output_tokens: 8,
+      }),
+      invalidEndpointMessage: 'Invalid Codex endpoint',
+    };
+  }
+
+  return {
+    endpoint: buildOpenAIChatCompletionsEndpoint(input.baseUrl),
+    data: JSON.stringify({
+      model: input.testModel,
+      messages: [{ role: 'user', content: 'Hi' }],
+      stream: input.stream,
+      max_tokens: 8,
+    }),
+    invalidEndpointMessage: 'Invalid OpenAI-compatible endpoint',
+  };
 };
 
 const getErrorMessageFromObject = (input: unknown): string => {
@@ -366,11 +404,14 @@ export async function runProviderConnectivityTest(input: {
     return;
   }
 
-  const endpoint = buildOpenAIChatCompletionsEndpoint(
-    provider === 'codex' ? normalizeOpenAIBaseUrl(input.baseUrl) : input.baseUrl
-  );
+  const { endpoint, data: requestData, invalidEndpointMessage } = buildOpenAIStyleConnectivityRequest({
+    provider,
+    baseUrl: input.baseUrl,
+    testModel: input.testModel,
+    stream: shouldStream,
+  });
   if (!endpoint) {
-    throw new Error('Invalid OpenAI-compatible endpoint');
+    throw new Error(invalidEndpointMessage);
   }
 
   const resolvedHeaders: Record<string, string> = {
@@ -383,13 +424,6 @@ export async function runProviderConnectivityTest(input: {
   if (shouldStream && !hasHeader(resolvedHeaders, 'accept')) {
     resolvedHeaders.Accept = 'text/event-stream';
   }
-
-  const requestData = JSON.stringify({
-    model: input.testModel,
-    messages: [{ role: 'user', content: 'Hi' }],
-    stream: shouldStream,
-    max_tokens: 8,
-  });
 
   if (shouldStream) {
     await runStreamingConnectivityTest({
