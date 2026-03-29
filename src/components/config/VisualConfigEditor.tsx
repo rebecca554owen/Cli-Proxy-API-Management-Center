@@ -98,6 +98,7 @@ export function VisualConfigEditor({ values, validationErrors, disabled = false,
     values.streaming.nonstreamKeepaliveInterval === '' || values.streaming.nonstreamKeepaliveInterval === '0';
   const portError = getValidationMessage(t, validationErrors?.port);
   const logsMaxSizeError = getValidationMessage(t, validationErrors?.logsMaxTotalSizeMb);
+  const usageRetentionDaysError = getValidationMessage(t, validationErrors?.usageRetentionDays);
   const requestRetryError = getValidationMessage(t, validationErrors?.requestRetry);
   const maxRetryIntervalError = getValidationMessage(t, validationErrors?.maxRetryInterval);
   const keepaliveError = getValidationMessage(t, validationErrors?.['streaming.keepaliveSeconds']);
@@ -273,6 +274,16 @@ export function VisualConfigEditor({ values, validationErrors, disabled = false,
               onChange={(e) => onChange({ logsMaxTotalSizeMb: e.target.value })}
               disabled={disabled}
               error={logsMaxSizeError}
+            />
+            <Input
+              label={t('config_management.visual.sections.system.usage_retention_days')}
+              type="number"
+              placeholder="30"
+              value={values.usageRetentionDays}
+              onChange={(e) => onChange({ usageRetentionDays: e.target.value })}
+              disabled={disabled}
+              error={usageRetentionDaysError}
+              hint={t('config_management.visual.sections.system.usage_retention_days_hint')}
             />
           </SectionGrid>
         </div>

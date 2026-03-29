@@ -57,6 +57,7 @@ const SECTION_CONFIG_KEYS: Record<RawConfigSection, ConfigPropertyKey> = {
   'request-log': 'requestLog',
   'logging-to-file': 'loggingToFile',
   'logs-max-total-size-mb': 'logsMaxTotalSizeMb',
+  'usage-retention-days': 'usageRetentionDays',
   'ws-auth': 'wsAuth',
   'force-model-prefix': 'forceModelPrefix',
   'routing/strategy': 'routingStrategy',

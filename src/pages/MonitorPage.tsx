@@ -101,6 +101,7 @@ export function MonitorPage() {
   const loading = providerMetaEntry.loading && !providerMetaEntry.updatedAt;
 
   const [timeRange, setTimeRange] = useState<TimeRange>(7);
+  const [apiFilterDraft, setApiFilterDraft] = useState('');
   const [apiFilter, setApiFilter] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
   const loadProviderMeta = useCallback(
@@ -132,7 +133,7 @@ export function MonitorPage() {
 
   // 处理 API 过滤应用（触发数据刷新）
   const handleApiFilterApply = () => {
-    setRefreshKey((k) => k + 1);
+    setApiFilter(apiFilterDraft.trim());
   };
 
   return (
@@ -198,8 +199,13 @@ export function MonitorPage() {
             type="text"
             className={styles.filterInput}
             placeholder={t('monitor.api_filter_placeholder')}
-            value={apiFilter}
-            onChange={(e) => setApiFilter(e.target.value)}
+            value={apiFilterDraft}
+            onChange={(e) => setApiFilterDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                handleApiFilterApply();
+              }
+            }}
           />
           <Button variant="secondary" size="sm" onClick={handleApiFilterApply}>
             {t('monitor.apply')}

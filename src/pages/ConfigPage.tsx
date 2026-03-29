@@ -15,6 +15,7 @@ import { DiffModal } from '@/components/config/DiffModal';
 import { useVisualConfig } from '@/hooks/useVisualConfig';
 import { useNotificationStore, useAuthStore, useThemeStore } from '@/stores';
 import { configFileApi } from '@/services/api/configFile';
+import { configApi } from '@/services/api/config';
 import { type ConfigEditorTab } from './configSave';
 import styles from './ConfigPage.module.scss';
 
@@ -60,6 +61,7 @@ export function ConfigPage() {
   const [diffModalOpen, setDiffModalOpen] = useState(false);
   const [serverYaml, setServerYaml] = useState('');
   const [mergedYaml, setMergedYaml] = useState('');
+  const [cleanupLoading, setCleanupLoading] = useState(false);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -432,6 +434,45 @@ export function ConfigPage() {
     });
   }, [isDirty, loadConfig, showConfirmation, t]);
 
+  const handleCleanupMonitorLogs = useCallback(async () => {
+    if (disableControls || cleanupLoading) return;
+
+    try {
+      const retentionDays = await configApi.getUsageRetentionDays();
+      showConfirmation({
+        title: t('config_management.monitor_cleanup.title'),
+        message: t('config_management.monitor_cleanup.confirm_message', { days: retentionDays }),
+        confirmText: t('config_management.monitor_cleanup.confirm_button'),
+        cancelText: t('common.cancel'),
+        variant: 'danger',
+        onConfirm: async () => {
+          setCleanupLoading(true);
+          try {
+            const result = await configApi.cleanupMonitorLogs();
+            showNotification(
+              t('config_management.monitor_cleanup.success', {
+                deleted: result.deleted,
+                days: result.usageRetentionDays,
+              }),
+              'success'
+            );
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : '';
+            showNotification(
+              `${t('config_management.monitor_cleanup.failed')}: ${message}`,
+              'error'
+            );
+          } finally {
+            setCleanupLoading(false);
+          }
+        },
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '';
+      showNotification(`${t('config_management.monitor_cleanup.failed')}: ${message}`, 'error');
+    }
+  }, [cleanupLoading, disableControls, showConfirmation, showNotification, t]);
+
   const floatingActions = (
     <div className={styles.floatingActionContainer} ref={floatingActionsRef}>
       <div className={styles.floatingActionList}>
@@ -491,6 +532,22 @@ export function ConfigPage() {
         >
           {t('config_management.tabs.source', { defaultValue: '源代码编辑' })}
         </button>
+      </div>
+
+      <div className={styles.pageActions}>
+        <Button
+          variant="danger"
+          onClick={() => {
+            void handleCleanupMonitorLogs();
+          }}
+          disabled={disableControls || loading}
+          loading={cleanupLoading}
+        >
+          {t('config_management.monitor_cleanup.button')}
+        </Button>
+        <span className={styles.pageActionsHint}>
+          {t('config_management.monitor_cleanup.hint')}
+        </span>
       </div>
 
       <Card className={styles.configCard}>

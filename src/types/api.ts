@@ -45,6 +45,18 @@ export interface LogsMaxTotalSizeResponse {
   logsMaxTotalSizeMb?: number | string;
 }
 
+export interface UsageRetentionDaysResponse {
+  'usage-retention-days'?: number | string;
+  usageRetentionDays?: number | string;
+}
+
+export interface MonitorCleanupResponse {
+  deleted?: number;
+  'usage-retention-days'?: number;
+  usageRetentionDays?: number;
+  status?: string;
+}
+
 export interface ForceModelPrefixResponse {
   'force-model-prefix'?: boolean;
   forceModelPrefix?: boolean;

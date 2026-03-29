@@ -7,7 +7,9 @@ import type {
   Config,
   ForceModelPrefixResponse,
   LogsMaxTotalSizeResponse,
+  MonitorCleanupResponse,
   RoutingStrategyResponse,
+  UsageRetentionDaysResponse,
 } from '@/types';
 import { normalizeConfigResponse } from './transformers';
 
@@ -88,6 +90,26 @@ export const configApi = {
    * 更新日志总大小上限（MB）
    */
   updateLogsMaxTotalSizeMb: (value: number) => apiClient.put('/logs-max-total-size-mb', { value }),
+
+  async getUsageRetentionDays(): Promise<number> {
+    const data = await apiClient.get<UsageRetentionDaysResponse>('/usage-retention-days');
+    const value = data?.['usage-retention-days'] ?? data?.usageRetentionDays ?? 30;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
+  },
+
+  updateUsageRetentionDays: (value: number) => apiClient.put('/usage-retention-days', { value }),
+
+  async cleanupMonitorLogs(): Promise<{ deleted: number; usageRetentionDays: number }> {
+    const data = await apiClient.post<MonitorCleanupResponse>('/custom/monitor-cleanup');
+    const deleted = Number(data?.deleted ?? 0);
+    const usageRetentionDays = Number(data?.['usage-retention-days'] ?? data?.usageRetentionDays ?? 30);
+    return {
+      deleted: Number.isFinite(deleted) ? deleted : 0,
+      usageRetentionDays:
+        Number.isFinite(usageRetentionDays) && usageRetentionDays > 0 ? usageRetentionDays : 30,
+    };
+  },
 
   /**
    * WebSocket 鉴权开关

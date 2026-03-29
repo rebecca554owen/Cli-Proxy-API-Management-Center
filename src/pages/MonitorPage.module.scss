@@ -536,19 +536,18 @@
 
 // 表格样式
 .tableWrapper {
-  overflow-x: auto;
-  max-height: 400px;
-  -webkit-overflow-scrolling: touch;
-
-  @include mobile {
-    max-height: 350px;
-  }
+  width: 100%;
 }
 
 // 虚拟滚动容器
 .virtualScrollContainer {
   overflow: auto;
+  height: clamp(360px, 52dvh, 720px);
   -webkit-overflow-scrolling: touch;
+
+  @include mobile {
+    height: clamp(320px, 48dvh, 560px);
+  }
 
   // 自定义滚动条
   &::-webkit-scrollbar {

@@ -20,6 +20,7 @@ export interface Config {
   requestLog?: boolean;
   loggingToFile?: boolean;
   logsMaxTotalSizeMb?: number;
+  usageRetentionDays?: number;
   wsAuth?: boolean;
   forceModelPrefix?: boolean;
   routingStrategy?: string;
@@ -43,6 +44,7 @@ export type RawConfigSection =
   | 'request-log'
   | 'logging-to-file'
   | 'logs-max-total-size-mb'
+  | 'usage-retention-days'
   | 'ws-auth'
   | 'force-model-prefix'
   | 'routing/strategy'
@@ -64,6 +66,7 @@ export interface ConfigSectionValueMap {
   'request-log': boolean | undefined;
   'logging-to-file': boolean | undefined;
   'logs-max-total-size-mb': number | undefined;
+  'usage-retention-days': number | undefined;
   'ws-auth': boolean | undefined;
   'force-model-prefix': boolean | undefined;
   'routing/strategy': string | undefined;

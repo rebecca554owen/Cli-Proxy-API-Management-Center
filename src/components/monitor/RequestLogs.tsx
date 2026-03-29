@@ -143,10 +143,22 @@ export function RequestLogs({
       api_filter: apiFilter || undefined,
       model: filterModel || undefined,
       source: filterSource || undefined,
+      provider_type: filterProviderType || undefined,
       status: filterStatus || undefined,
       ...buildMonitorTimeRangeParams(timeRange, customRange),
     }),
-    [page, pageSize, filterApi, apiFilter, filterModel, filterSource, filterStatus, timeRange, customRange]
+    [
+      page,
+      pageSize,
+      filterApi,
+      apiFilter,
+      filterModel,
+      filterSource,
+      filterProviderType,
+      filterStatus,
+      timeRange,
+      customRange,
+    ]
   );
   const cacheKey = useMemo(() => serializeMonitorParams(params), [params]);
   const entry = useMonitorStore((state) => state.requestLogsCache[cacheKey]);
@@ -238,12 +250,7 @@ export function RequestLogs({
     return Array.from(typeSet).sort();
   }, [filterOptions.sources, providerTypeMap]);
 
-  const filteredEntries = useMemo(() => {
-    if (!filterProviderType) {
-      return logEntries;
-    }
-    return logEntries.filter((entry) => entry.providerType === filterProviderType);
-  }, [logEntries, filterProviderType]);
+  const filteredEntries = logEntries;
 
   const rowVirtualizer = useVirtualizer({
     count: filteredEntries.length,
@@ -426,7 +433,10 @@ export function RequestLogs({
           <select
             className={styles.logSelect}
             value={filterProviderType}
-            onChange={(e) => setFilterProviderType(e.target.value)}
+            onChange={(e) => {
+              setFilterProviderType(e.target.value);
+              setPage(1);
+            }}
           >
             <option value="">{t('monitor.logs.all_provider_types')}</option>
             {providerTypes.map((type) => (
@@ -540,11 +550,6 @@ export function RequestLogs({
               <div
                 ref={tableContainerRef}
                 className={styles.virtualScrollContainer}
-                style={{
-                  height: 'calc(100vh - 420px)',
-                  minHeight: '360px',
-                  overflow: 'auto',
-                }}
                 onScroll={handleScroll}
               >
                 <div

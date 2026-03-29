@@ -391,6 +391,15 @@ export const normalizeConfigResponse = (raw: unknown): Config => {
       config.logsMaxTotalSizeMb = parsed;
     }
   }
+  const usageRetentionDays = raw['usage-retention-days'] ?? raw.usageRetentionDays;
+  if (typeof usageRetentionDays === 'number' && Number.isFinite(usageRetentionDays)) {
+    config.usageRetentionDays = usageRetentionDays;
+  } else if (typeof usageRetentionDays === 'string' && usageRetentionDays.trim() !== '') {
+    const parsed = Number(usageRetentionDays);
+    if (Number.isFinite(parsed)) {
+      config.usageRetentionDays = parsed;
+    }
+  }
   config.wsAuth = normalizeBoolean(raw['ws-auth'] ?? raw.wsAuth);
   config.forceModelPrefix = normalizeBoolean(raw['force-model-prefix'] ?? raw.forceModelPrefix);
   const routing = raw.routing;

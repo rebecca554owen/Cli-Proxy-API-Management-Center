@@ -4,10 +4,9 @@ import type { MonitorServiceHealthData } from '@/services/api/monitor';
 import { useMonitorStore } from '@/stores';
 import styles from '@/pages/MonitorPage.module.scss';
 
-const ROWS = 7;
-const COLS = 96;
-const BLOCK_COUNT = ROWS * COLS;
-const BLOCK_DURATION_MS = 15 * 60 * 1000;
+const DEFAULT_ROWS = 7;
+const DEFAULT_COLS = 96;
+const DEFAULT_BLOCK_DURATION_MS = 15 * 60 * 1000;
 
 const COLOR_STOPS = [
   { r: 239, g: 68, b: 68 },   // #ef4444
@@ -46,17 +45,20 @@ interface BlockDetail {
 
 function buildBlockDetails(data: MonitorServiceHealthData): BlockDetail[] {
   const now = Date.now();
-  const windowStart = now - BLOCK_COUNT * BLOCK_DURATION_MS;
+  const rows = data.rows || DEFAULT_ROWS;
+  const cols = data.cols || DEFAULT_COLS;
+  const blockDurationMs = data.block_duration_ms || DEFAULT_BLOCK_DURATION_MS;
+  const windowStart = now - rows * cols * blockDurationMs;
 
   return data.blocks.map((block, idx) => {
     const total = block.success + block.failure;
-    const blockStartTime = windowStart + idx * BLOCK_DURATION_MS;
+    const blockStartTime = windowStart + idx * blockDurationMs;
     return {
       success: block.success,
       failure: block.failure,
       rate: total > 0 ? block.success / total : -1,
       startTime: blockStartTime,
-      endTime: blockStartTime + BLOCK_DURATION_MS,
+      endTime: blockStartTime + blockDurationMs,
     };
   });
 }
@@ -71,6 +73,9 @@ export function ServiceHealthCard({ refreshKey }: ServiceHealthCardProps) {
   const entry = useMonitorStore((state) => state.serviceHealth);
   const [activeTooltip, setActiveTooltip] = useState<number | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const data: MonitorServiceHealthData | null = entry.data ?? null;
+  const rows = data?.rows || DEFAULT_ROWS;
+  const cols = data?.cols || DEFAULT_COLS;
 
   useEffect(() => {
     void ensureServiceHealth(refreshKey > 0);
@@ -103,14 +108,14 @@ export function ServiceHealthCard({ refreshKey }: ServiceHealthCardProps) {
   }, []);
 
   const getTooltipPositionClass = (idx: number): string => {
-    const col = Math.floor(idx / ROWS);
+    const col = Math.floor(idx / rows);
     if (col <= 2) return styles.healthTooltipLeft;
-    if (col >= COLS - 3) return styles.healthTooltipRight;
+    if (col >= cols - 3) return styles.healthTooltipRight;
     return '';
   };
 
   const getTooltipVerticalClass = (idx: number): string => {
-    const row = idx % ROWS;
+    const row = idx % rows;
     if (row <= 1) return styles.healthTooltipBelow;
     return '';
   };
@@ -137,7 +142,6 @@ export function ServiceHealthCard({ refreshKey }: ServiceHealthCardProps) {
     );
   };
 
-  const data: MonitorServiceHealthData | null = entry.data ?? null;
   const loading = !data && entry.loading;
   const error = Boolean(entry.error);
   const blockDetails = data ? buildBlockDetails(data) : [];
@@ -179,7 +183,11 @@ export function ServiceHealthCard({ refreshKey }: ServiceHealthCardProps) {
       ) : (
         <>
           <div className={styles.healthGridScroller}>
-            <div className={styles.healthGrid} ref={gridRef}>
+            <div
+              className={styles.healthGrid}
+              ref={gridRef}
+              style={{ gridTemplateRows: `repeat(${rows}, 10px)` }}
+            >
               {blockDetails.map((detail, idx) => {
                 const isIdle = detail.rate === -1;
                 const blockStyle = isIdle ? undefined : { backgroundColor: rateToColor(detail.rate) };

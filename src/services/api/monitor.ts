@@ -53,6 +53,7 @@ export interface MonitorRequestLogsQuery extends MonitorTimeRangeQuery {
   model?: string;
   source?: string;
   channel?: string;
+  provider_type?: string;
   status?: '' | 'success' | 'failed';
 }
 

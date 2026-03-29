@@ -24,6 +24,19 @@
   margin: 0 0 $spacing-xl 0;
 }
 
+.pageActions {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  margin-bottom: $spacing-lg;
+  flex-wrap: wrap;
+}
+
+.pageActionsHint {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
 .tabBar {
   display: flex;
   align-items: center;
