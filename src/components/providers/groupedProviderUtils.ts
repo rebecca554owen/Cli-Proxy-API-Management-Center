@@ -46,12 +46,13 @@ const toKeyEntryDraft = (
   apiKey: string | undefined,
   proxyUrl: string | undefined,
   headers?: Record<string, string>,
-  excludedModels?: string[]
+  excludedModels?: string[],
+  disabled?: boolean
 ): ProviderKeyEntryDraft => ({
   apiKey: String(apiKey ?? ''),
   proxyUrl: String(proxyUrl ?? ''),
   headers: headersToEntries(headers),
-  enabled: !hasDisableAllModelsRule(excludedModels),
+  enabled: disabled === undefined ? !hasDisableAllModelsRule(excludedModels) : !disabled,
   testStatus: 'idle',
   testMessage: '',
 });
@@ -181,7 +182,7 @@ export const buildOpenAIGroupFormState = (
   testModel: config?.testModel ?? config?.models?.[0]?.name ?? '',
   keyEntries: config?.apiKeyEntries?.length
     ? config.apiKeyEntries.map((entry) =>
-        toKeyEntryDraft(entry.apiKey, entry.proxyUrl, entry.headers)
+        toKeyEntryDraft(entry.apiKey, entry.proxyUrl, entry.headers, undefined, entry.disabled)
       )
     : [toKeyEntryDraft('', '', undefined)],
 });
@@ -274,6 +275,7 @@ export const buildOpenAIProviderFromGroupForm = (
     apiKey: entry.apiKey,
     proxyUrl: entry.proxyUrl,
     headers: entry.headers,
+    disabled: entry.enabled === false,
   }));
 
   return {
@@ -333,6 +335,7 @@ export const buildOpenAIProviderFromForm = (
       apiKey: String(entry.apiKey ?? '').trim(),
       proxyUrl: String(entry.proxyUrl ?? '').trim() || undefined,
       headers: Object.keys(normalizedHeaders).length ? normalizedHeaders : undefined,
+      disabled: Boolean(entry.disabled),
     };
   });
 
@@ -459,9 +462,15 @@ export const buildOpenAIProviderCard = (
   keyStats: KeyStats,
   statusBarBySource: Map<string, StatusBarData>
 ) => {
+  const totalKeyCount = config.apiKeyEntries?.length ?? 0;
+  const enabledKeyCount = (config.apiKeyEntries ?? []).filter((entry) => !entry.disabled).length;
+  const disabledKeyCount = (config.apiKeyEntries ?? []).filter((entry) => entry.disabled).length;
   const candidates = new Set<string>();
   buildCandidateUsageSourceIds({ prefix: config.prefix }).forEach((id) => candidates.add(id));
   (config.apiKeyEntries || []).forEach((entry) => {
+    if (entry.disabled) {
+      return;
+    }
     buildCandidateUsageSourceIds({ apiKey: entry.apiKey }).forEach((id) => candidates.add(id));
   });
 
@@ -473,12 +482,14 @@ export const buildOpenAIProviderCard = (
       formatProviderEndpoint(config.baseUrl) ||
       `OpenAI #${index + 1}`,
     baseUrl: formatProviderEndpoint(config.baseUrl),
-    keyCount: config.apiKeyEntries?.length ?? 0,
+    keyCount: totalKeyCount,
+    enabledKeyCount,
+    disabledKeyCount,
     modelCount: config.models?.length ?? 0,
     statusData: lookupStatusBar(statusBarBySource, Array.from(candidates)),
     success: getOpenAIProviderStats(config.apiKeyEntries, keyStats, config.prefix).success,
     failure: getOpenAIProviderStats(config.apiKeyEntries, keyStats, config.prefix).failure,
-    enabled: !hasDisableAllModelsRule(config.excludedModels),
+    enabled: totalKeyCount === 0 || enabledKeyCount > 0,
   };
 };
 
@@ -512,6 +523,7 @@ export const buildLegacyOpenAIFormState = (groupForm: ProviderGroupFormState): O
     apiKey: entry.apiKey,
     proxyUrl: entry.proxyUrl || undefined,
     headers: buildHeaderObject(entry.headers),
+    disabled: entry.enabled === false,
   })),
   testModel: groupForm.testModel || undefined,
 });

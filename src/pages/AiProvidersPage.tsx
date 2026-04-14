@@ -277,7 +277,13 @@ export function AiProvidersPage() {
       setConfigSwitchingKey(switchingKey);
 
       const previousList = openaiProviders;
-      const nextItem = setProviderEntryEnabled(current, enabled);
+      const nextItem = {
+        ...current,
+        apiKeyEntries: (current.apiKeyEntries || []).map((entry) => ({
+          ...entry,
+          disabled: !enabled,
+        })),
+      };
       const nextList = previousList.map((item, idx) => (idx === index ? nextItem : item));
 
       setOpenaiProviders(nextList);
@@ -285,13 +291,7 @@ export function AiProvidersPage() {
       clearCache('openai-compatibility');
 
       try {
-        await persistProviderConfigToggle({
-          list: previousList,
-          index,
-          enabled,
-          save: providersApi.saveOpenAIProviders,
-          section: 'openai-compatibility',
-        });
+        await providersApi.saveOpenAIProviders(nextList);
         showNotification(
           enabled ? t('notification.config_enabled') : t('notification.config_disabled'),
           'success'

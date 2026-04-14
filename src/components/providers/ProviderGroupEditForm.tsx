@@ -233,7 +233,7 @@ export function ProviderGroupEditForm({
           globalHeaders={form.headers}
           showStatusColumn={keyEditorShowStatusColumn}
           showProxyColumn={keyEditorShowProxyColumn}
-          showEnabledToggle={provider !== 'openai'}
+          showEnabledToggle
           highlightIndexes={keyEntryHighlightIndexes}
           statusBarDataByEntry={keyEntryStatusBars}
           singleEntryMode={singleEntryMode}

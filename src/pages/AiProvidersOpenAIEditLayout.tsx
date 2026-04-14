@@ -73,6 +73,7 @@ const buildCopyForm = (source: OpenAIProviderConfig): OpenAIFormState => ({
         apiKey: '',
         proxyUrl: '',
         headers: {},
+        disabled: false,
       }))
     : [buildApiKeyEntry()],
   modelEntries: modelsToEntries(source.models),
@@ -121,13 +122,15 @@ const normalizeApiKeyEntries = (entries: ApiKeyEntry[]) =>
       apiKey: string;
       proxyUrl: string;
       headers: Array<{ key: string; value: string }>;
+      disabled: boolean;
     }>
   >((acc, entry) => {
     const apiKey = String(entry?.apiKey ?? '').trim();
     const proxyUrl = String(entry?.proxyUrl ?? '').trim();
     const headers = normalizeKeyHeaders(entry?.headers);
-    if (!apiKey && !proxyUrl && headers.length === 0) return acc;
-    acc.push({ apiKey, proxyUrl, headers });
+    const disabled = Boolean(entry?.disabled);
+    if (!apiKey && !proxyUrl && headers.length === 0 && !disabled) return acc;
+    acc.push({ apiKey, proxyUrl, headers, disabled });
     return acc;
   }, []);
 

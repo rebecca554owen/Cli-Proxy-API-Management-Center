@@ -283,6 +283,7 @@ export function AiProvidersOpenAIEditPage() {
       apiKey: String(entry.apiKey ?? ''),
       proxyUrl: String(entry.proxyUrl ?? ''),
       headers: headersToEntries(entry.headers),
+      enabled: !entry.disabled,
       testStatus: keyTestStatuses[index]?.status ?? 'idle',
       testMessage: keyTestStatuses[index]?.message ?? '',
     })),

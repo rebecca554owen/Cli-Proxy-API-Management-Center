@@ -50,6 +50,37 @@ const resolveOpenAIProviderIndex = (
   });
 };
 
+const buildOpenAIProviderToggled = (
+  provider: OpenAIProviderConfig,
+  source: string,
+  meta: MonitorSourceMeta
+): OpenAIProviderConfig => {
+  const entries = provider.apiKeyEntries || [];
+  const shouldEnable = meta.disabled;
+  if (meta.scope === 'provider') {
+    return {
+      ...provider,
+      apiKeyEntries: entries.map((entry) => ({ ...entry, disabled: !shouldEnable })),
+    };
+  }
+
+  let matched = false;
+  const nextEntries = entries.map((entry) => {
+    if (entry.apiKey !== source) {
+      return entry;
+    }
+    matched = true;
+    return { ...entry, disabled: !shouldEnable };
+  });
+  if (!matched) {
+    throw new Error('OpenAI key entry not found');
+  }
+  return {
+    ...provider,
+    apiKeyEntries: nextEntries,
+  };
+};
+
 export function useMonitorChannelActions(
   options: UseMonitorChannelActionsOptions
 ): UseMonitorChannelActionsReturn {
@@ -129,13 +160,10 @@ export function useMonitorChannelActions(
     if (index < 0) {
       throw new Error(t('monitor.logs.disable_error_no_provider'));
     }
-    await persistProviderConfigToggle({
-      list,
-      index,
-      enabled: meta.disabled,
-      save: providersApi.saveOpenAIProviders,
-      section: 'openai-compatibility',
-    });
+    const current = list[index];
+    const nextProvider = buildOpenAIProviderToggled(current, source, meta);
+    const nextList = list.map((item, currentIndex) => (currentIndex === index ? nextProvider : item));
+    await providersApi.saveOpenAIProviders(nextList);
   }, [t]);
 
   const toggleSource = useCallback(async (source: string) => {

@@ -309,6 +309,8 @@ const buildProviderMeta = async (): Promise<MonitorProviderMeta> => {
   openaiProviders.forEach((provider, providerIndex) => {
     const providerName = provider.headers?.['X-Provider'] || provider.name || 'unknown';
     const apiKeyEntries = provider.apiKeyEntries || [];
+    const disabledKeyCount = apiKeyEntries.filter((entry) => entry.disabled).length;
+    const providerDisabled = apiKeyEntries.length > 0 && disabledKeyCount === apiKeyEntries.length;
     const providerAliases = collectSourceAliases({
       prefix: provider.prefix,
       extra: [provider.name],
@@ -316,9 +318,10 @@ const buildProviderMeta = async (): Promise<MonitorProviderMeta> => {
     registerSourceMeta(providerAliases, providerName, 'OpenAI', {
       source: provider.prefix?.trim() || provider.name || providerName,
       canonicalSource: provider.prefix?.trim() || provider.name || providerName,
+      scope: 'provider',
       kind: 'openai',
       providerType: 'OpenAI',
-      disabled: hasDisableAllModelsRule(provider.excludedModels),
+      disabled: providerDisabled,
       canToggle: true,
       copyValue: '',
       editPath: `/ai-providers/openai/${providerIndex}`,
@@ -329,10 +332,11 @@ const buildProviderMeta = async (): Promise<MonitorProviderMeta> => {
       if (apiKey) {
         registerSourceMeta(collectSourceAliases({ apiKey }), providerName, 'OpenAI', {
           source: apiKey,
-          canonicalSource: provider.prefix?.trim() || provider.name || apiKey,
+          canonicalSource: apiKey,
+          scope: 'key',
           kind: 'openai',
           providerType: 'OpenAI',
-          disabled: hasDisableAllModelsRule(provider.excludedModels),
+          disabled: Boolean(entry.disabled),
           canToggle: true,
           copyValue: apiKey,
           editPath: `/ai-providers/openai/${providerIndex}`,

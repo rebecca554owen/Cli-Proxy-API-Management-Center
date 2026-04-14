@@ -14,7 +14,6 @@ import { buildOpenAIProviderCard } from '../groupedProviderUtils';
 import {
   buildProviderIdentityPresentation,
   formatProviderEndpoint,
-  hasDisableAllModelsRule,
 } from '../utils';
 
 interface OpenAISectionProps {
@@ -83,7 +82,7 @@ export function OpenAISection({
           onEdit={onEdit}
           onDelete={onDelete}
           actionsDisabled={actionsDisabled}
-          getRowDisabled={(item) => hasDisableAllModelsRule(item.excludedModels)}
+          getRowDisabled={(item) => (item.apiKeyEntries?.length ?? 0) > 0 && item.apiKeyEntries!.every((entry) => entry.disabled)}
           extraActionButtons={(_, index) => (
             <Button
               variant="secondary"
@@ -96,24 +95,30 @@ export function OpenAISection({
             </Button>
           )}
           renderExtraActions={(item, index) => (
+            (() => {
+              const allDisabled =
+                (item.apiKeyEntries?.length ?? 0) > 0 && item.apiKeyEntries!.every((entry) => entry.disabled);
+              return (
             <Button
               variant="secondary"
               size="sm"
               className={`${styles.providerActionButton} ${
-                hasDisableAllModelsRule(item.excludedModels)
+                allDisabled
                   ? styles.providerEnableButton
                   : styles.providerDisableButton
               }`}
               disabled={toggleDisabled}
-              onClick={() => void onToggle(index, hasDisableAllModelsRule(item.excludedModels))}
+              onClick={() => void onToggle(index, allDisabled)}
             >
-              {hasDisableAllModelsRule(item.excludedModels) ? '启用' : '禁用'}
+              {allDisabled ? '启用' : '禁用'}
             </Button>
+              );
+            })()
           )}
           renderContent={(item, index) => {
             const card = buildOpenAIProviderCard(item, index, keyStats, statusBarBySource);
             const apiKeyEntries = item.apiKeyEntries || [];
-            const configDisabled = hasDisableAllModelsRule(item.excludedModels);
+            const configDisabled = !card.enabled;
             const endpoint = formatProviderEndpoint(item.baseUrl);
             const identity = buildProviderIdentityPresentation({
               primary: item.name?.trim() || item.prefix?.trim(),
@@ -150,6 +155,12 @@ export function OpenAISection({
                         {t('stats.failure')}: {card.failure}
                       </span>
                     </div>
+                    <div className={styles.providerStatusMeta}>
+                      {t('common.api_key')}: {card.keyCount}
+                    </div>
+                    <div className={styles.providerStatusMeta}>
+                      {card.enabledKeyCount === 0 ? '禁用' : '启用'}
+                    </div>
                   </div>
                 </div>
                 <div className={styles.providerCardBody}>
@@ -169,6 +180,11 @@ export function OpenAISection({
                       <div className={styles.providerMetaLine}>
                         {t('ai_providers.openai_keys_count')}: {apiKeyEntries.length}
                       </div>
+                      {card.disabledKeyCount > 0 && (
+                        <div className={styles.providerMetaLine}>
+                          已禁用 Key: {card.disabledKeyCount}
+                        </div>
+                      )}
                       {item.testModel && (
                         <div className={styles.providerMetaLine}>Test: {item.testModel}</div>
                       )}

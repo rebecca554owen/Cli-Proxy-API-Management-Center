@@ -69,6 +69,7 @@ export type MonitorSourceKind =
 export interface MonitorSourceMeta {
   source: string;
   canonicalSource?: string;
+  scope?: 'provider' | 'key';
   kind: MonitorSourceKind;
   providerType: string;
   disabled: boolean;
@@ -111,6 +112,14 @@ export function monitorSourceRefToMeta(
   return {
     source: sourceRef.entity_id,
     canonicalSource: sourceRef.canonical_source || sourceRef.entity_id,
+    scope:
+      sourceRef.kind === 'openai'
+        ? sourceRef.can_copy
+          ? 'key'
+          : 'provider'
+        : sourceRef.entity_kind === 'provider-config'
+          ? 'provider'
+          : 'key',
     kind,
     providerType: sourceRef.provider_type || '',
     disabled: !!sourceRef.disabled,
