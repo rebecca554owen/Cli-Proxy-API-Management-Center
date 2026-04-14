@@ -10,6 +10,8 @@ import {
   ProviderGroupEditForm,
   buildLegacyOpenAIFormState,
   hasProviderConnectivityAuth,
+  haveProviderKeyConnectivityChanged,
+  remapProviderKeyTestStatuses,
   resolveConnectivityErrorMessage,
   runProviderConnectivityTest,
 } from '@/components/providers';
@@ -40,6 +42,7 @@ export function AiProvidersOpenAIEditPage() {
     setTestMessage,
     keyTestStatuses,
     setDraftKeyTestStatus,
+    setDraftKeyTestStatuses,
     resetDraftKeyTestStatuses,
     availableModels,
     handleBack,
@@ -292,14 +295,42 @@ export function AiProvidersOpenAIEditPage() {
   const setSharedForm = useCallback(
     (action: (prev: ProviderGroupFormState) => ProviderGroupFormState) => {
       const nextSharedForm = action(sharedForm);
+      const previousEntries = sharedForm.keyEntries;
+      const nextEntries = nextSharedForm.keyEntries;
       const nextForm = buildLegacyOpenAIFormState(nextSharedForm);
+      const connectivityChanged = haveProviderKeyConnectivityChanged(previousEntries, nextEntries);
+      const structureChanged = previousEntries.length !== nextEntries.length;
+
       setForm(nextForm);
       setTestModel(nextSharedForm.testModel);
-      resetDraftKeyTestStatuses(nextSharedForm.keyEntries.length);
-      setTestStatus('idle');
-      setTestMessage('');
+
+      if (connectivityChanged) {
+        resetDraftKeyTestStatuses(nextEntries.length);
+        setTestStatus('idle');
+        setTestMessage('');
+        return;
+      }
+
+      const visibleStatuses = previousEntries.map((entry) => ({
+        status: entry.testStatus,
+        message: entry.testMessage,
+      }));
+      setDraftKeyTestStatuses(remapProviderKeyTestStatuses(previousEntries, visibleStatuses, nextEntries));
+
+      if (structureChanged) {
+        setTestStatus('idle');
+        setTestMessage('');
+      }
     },
-    [resetDraftKeyTestStatuses, setForm, setTestMessage, setTestModel, setTestStatus, sharedForm]
+    [
+      resetDraftKeyTestStatuses,
+      setDraftKeyTestStatuses,
+      setForm,
+      setTestMessage,
+      setTestModel,
+      setTestStatus,
+      sharedForm,
+    ]
   );
 
   return (

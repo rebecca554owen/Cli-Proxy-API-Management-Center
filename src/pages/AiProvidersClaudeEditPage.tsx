@@ -11,6 +11,8 @@ import { useNotificationStore } from '@/stores';
 import {
   ProviderGroupEditForm,
   hasProviderConnectivityAuth,
+  haveProviderKeyConnectivityChanged,
+  remapProviderKeyTestStatuses,
   resolveConnectivityErrorMessage,
   runProviderConnectivityTest,
 } from '@/components/providers';
@@ -374,13 +376,48 @@ export function AiProvidersClaudeEditPage() {
               })),
             }}
             setForm={(action) => {
-              setForm(action);
-              setTestModel((prev) => {
-                const next = typeof action === 'function' ? action(form) : action;
-                return next.testModel ?? prev;
+              const next = typeof action === 'function' ? action(form) : action;
+              const connectivityChanged = haveProviderKeyConnectivityChanged(form.keyEntries, next.keyEntries);
+              const structureChanged = form.keyEntries.length !== next.keyEntries.length;
+
+              setForm(() => {
+                if (connectivityChanged) {
+                  return {
+                    ...next,
+                    keyEntries: next.keyEntries.map((entry) => ({
+                      ...entry,
+                      testStatus: 'idle',
+                      testMessage: '',
+                    })),
+                  };
+                }
+
+                if (structureChanged) {
+                  const nextStatuses = remapProviderKeyTestStatuses(
+                    form.keyEntries,
+                    form.keyEntries.map((entry) => ({
+                      status: entry.testStatus,
+                      message: entry.testMessage,
+                    })),
+                    next.keyEntries
+                  );
+                  return {
+                    ...next,
+                    keyEntries: next.keyEntries.map((entry, index) => ({
+                      ...entry,
+                      testStatus: nextStatuses[index]?.status ?? 'idle',
+                      testMessage: nextStatuses[index]?.message ?? '',
+                    })),
+                  };
+                }
+
+                return next;
               });
-              setTestStatus('idle');
-              setTestMessage('');
+              setTestModel(next.testModel ?? testModel);
+              if (connectivityChanged || structureChanged) {
+                setTestStatus('idle');
+                setTestMessage('');
+              }
             }}
             disabled={saving || disableControls}
             testing={isTesting}

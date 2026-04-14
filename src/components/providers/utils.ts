@@ -4,6 +4,8 @@ import type {
   AmpcodeUpstreamApiKeyMapping,
   ApiKeyEntry,
 } from '@/types';
+import type { HeaderEntry } from '@/utils/headers';
+import { normalizeHeaderEntries } from '@/utils/headers';
 import {
   DISABLE_ALL_MODELS_RULE,
   hasDisableAllModelsRule,
@@ -12,7 +14,7 @@ import {
   withoutDisableAllModelsRule,
 } from '@/utils/providerRules';
 import { buildCandidateUsageSourceIds, type KeyStatBucket, type KeyStats } from '@/utils/usage';
-import type { AmpcodeFormState, AmpcodeUpstreamApiKeyEntry, ModelEntry } from './types';
+import type { AmpcodeFormState, AmpcodeUpstreamApiKeyEntry, ModelEntry, ProviderKeyEntryDraft } from './types';
 
 export {
   DISABLE_ALL_MODELS_RULE,
@@ -217,6 +219,63 @@ export const buildApiKeyEntry = (input?: Partial<ApiKeyEntry>): ApiKeyEntry => (
   headers: input?.headers ?? {},
   disabled: input?.disabled ?? false,
 });
+
+export type ProviderKeyTestStatus = {
+  status: 'idle' | 'loading' | 'success' | 'error';
+  message: string;
+};
+
+const normalizeDraftHeaderEntries = (headers: HeaderEntry[] | undefined) =>
+  normalizeHeaderEntries(headers ?? []).map((entry) => ({
+    key: entry.key.trim(),
+    value: entry.value.trim(),
+  }));
+
+const buildKeyEntryIdentity = (entry: Pick<ProviderKeyEntryDraft, 'apiKey' | 'proxyUrl' | 'headers'>) =>
+  JSON.stringify({
+    apiKey: String(entry.apiKey ?? '').trim(),
+    proxyUrl: String(entry.proxyUrl ?? '').trim(),
+    headers: normalizeDraftHeaderEntries(entry.headers),
+  });
+
+const isKeyConnectivitySame = (
+  left: Pick<ProviderKeyEntryDraft, 'apiKey' | 'proxyUrl' | 'headers'>,
+  right: Pick<ProviderKeyEntryDraft, 'apiKey' | 'proxyUrl' | 'headers'>
+) => buildKeyEntryIdentity(left) === buildKeyEntryIdentity(right);
+
+export const haveProviderKeyConnectivityChanged = (
+  previous: ProviderKeyEntryDraft[],
+  next: ProviderKeyEntryDraft[]
+): boolean => {
+  if (previous.length !== next.length) {
+    return false;
+  }
+  return previous.some((entry, index) => !isKeyConnectivitySame(entry, next[index]!));
+};
+
+export const remapProviderKeyTestStatuses = (
+  previousEntries: ProviderKeyEntryDraft[],
+  previousStatuses: ProviderKeyTestStatus[],
+  nextEntries: ProviderKeyEntryDraft[]
+): ProviderKeyTestStatus[] => {
+  const pools = new Map<string, ProviderKeyTestStatus[]>();
+
+  previousEntries.forEach((entry, index) => {
+    const key = buildKeyEntryIdentity(entry);
+    const existing = pools.get(key) ?? [];
+    existing.push(previousStatuses[index] ?? { status: 'idle', message: '' });
+    pools.set(key, existing);
+  });
+
+  return nextEntries.map((entry) => {
+    const key = buildKeyEntryIdentity(entry);
+    const pool = pools.get(key);
+    if (!pool?.length) {
+      return { status: 'idle', message: '' };
+    }
+    return pool.shift() ?? { status: 'idle', message: '' };
+  });
+};
 
 export const ampcodeMappingsToEntries = (mappings?: AmpcodeModelMapping[]): ModelEntry[] => {
   if (!Array.isArray(mappings) || mappings.length === 0) {

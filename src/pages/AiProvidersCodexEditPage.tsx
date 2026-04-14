@@ -16,7 +16,9 @@ import {
   buildProviderGroupFormState,
   buildNextProviderList,
   groupProviderConfigs,
+  haveProviderKeyConnectivityChanged,
   refreshMonitorProviderMeta,
+  remapProviderKeyTestStatuses,
   resolveConnectivityErrorMessage,
   runProviderConnectivityTest,
 } from '@/components/providers';
@@ -615,9 +617,45 @@ export function AiProvidersCodexEditPage() {
               setForm={(updater) => {
                 setForm((prev) => {
                   const next = updater(prev);
+                  const connectivityChanged = haveProviderKeyConnectivityChanged(prev.keyEntries, next.keyEntries);
+                  const structureChanged = prev.keyEntries.length !== next.keyEntries.length;
+
+                  if (connectivityChanged) {
+                    setSummaryStatus('idle');
+                    setSummaryMessage('');
+                    return {
+                      ...next,
+                      keyEntries: next.keyEntries.map((entry) => ({
+                        ...entry,
+                        testStatus: 'idle',
+                        testMessage: '',
+                      })),
+                    };
+                  }
+
+                  if (structureChanged) {
+                    setSummaryStatus('idle');
+                    setSummaryMessage('');
+                    const nextStatuses = remapProviderKeyTestStatuses(
+                      prev.keyEntries,
+                      prev.keyEntries.map((entry) => ({
+                        status: entry.testStatus,
+                        message: entry.testMessage,
+                      })),
+                      next.keyEntries
+                    );
+                    return {
+                      ...next,
+                      keyEntries: next.keyEntries.map((entry, index) => ({
+                        ...entry,
+                        testStatus: nextStatuses[index]?.status ?? 'idle',
+                        testMessage: nextStatuses[index]?.message ?? '',
+                      })),
+                    };
+                  }
+
                   return next;
                 });
-                resetConnectivityState();
               }}
               disabled={disableControls || saving}
               testing={isTesting}
