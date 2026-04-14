@@ -468,9 +468,6 @@ export const buildOpenAIProviderCard = (
   const candidates = new Set<string>();
   buildCandidateUsageSourceIds({ prefix: config.prefix }).forEach((id) => candidates.add(id));
   (config.apiKeyEntries || []).forEach((entry) => {
-    if (entry.disabled) {
-      return;
-    }
     buildCandidateUsageSourceIds({ apiKey: entry.apiKey }).forEach((id) => candidates.add(id));
   });
 

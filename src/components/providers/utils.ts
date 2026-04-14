@@ -125,7 +125,6 @@ export const getOpenAIProviderStats = (
   const sourceIds = new Set<string>();
   buildCandidateUsageSourceIds({ prefix: providerPrefix }).forEach((id) => sourceIds.add(id));
   (apiKeyEntries || []).forEach((entry) => {
-    if (entry?.disabled) return;
     buildCandidateUsageSourceIds({ apiKey: entry?.apiKey }).forEach((id) => sourceIds.add(id));
   });
 
