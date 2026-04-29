@@ -8,9 +8,9 @@ interface ProviderListProps<T> {
   loading: boolean;
   keyField: (item: T, index: number) => string;
   renderContent: (item: T, index: number) => ReactNode;
-  getActionIndex?: (item: T, index: number) => number;
-  onEdit: (index: number) => void;
-  onDelete: (index: number) => void;
+  getActionIndex?: (item: T, index: number) => string | number;
+  onEdit: (index: string | number) => void;
+  onDelete: (index: string | number) => void;
   emptyTitle: string;
   emptyDescription: string;
   deleteLabel?: string;

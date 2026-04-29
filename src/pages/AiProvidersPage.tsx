@@ -5,7 +5,9 @@ import {
   AmpcodeSection,
   ClaudeSection,
   CodexSection,
+  findProviderGroupBySignature,
   GeminiSection,
+  type GroupedProviderLocationState,
   OpenAISection,
   groupProviderConfigs,
   persistProviderConfigToggle,
@@ -143,33 +145,45 @@ export function AiProvidersPage() {
   useHeaderRefresh(refreshKeyStats);
 
   const openEditor = useCallback(
-    (path: string) => {
-      navigate(path, { state: { fromAiProviders: true } });
+    (path: string, state?: GroupedProviderLocationState) => {
+      navigate(path, { state: { fromAiProviders: true, ...(state ?? {}) } });
     },
     [navigate]
   );
 
   const duplicateClaudeConfig = useCallback(
-    (index: number) => {
+    (signature: string) => {
+      const group = findProviderGroupBySignature(
+        groupProviderConfigs('claude', claudeConfigs),
+        signature
+      );
+      if (!group) return;
       navigate('/ai-providers/claude/new', {
         state: {
           fromAiProviders: true,
-          copyIndex: index,
+          copyIndex: group.primaryIndex,
+          copySignature: group.id,
         },
       });
     },
-    [navigate]
+    [claudeConfigs, navigate]
   );
 
   const duplicateGeminiConfig = useCallback(
-    (index: number) => {
-      const entry = geminiKeys[index];
+    (signature: string) => {
+      const group = findProviderGroupBySignature(
+        groupProviderConfigs('gemini', geminiKeys),
+        signature
+      );
+      if (!group) return;
+      const entry = geminiKeys[group.primaryIndex];
       if (!entry) return;
       navigate('/ai-providers/gemini/new', {
         state: {
           fromAiProviders: true,
           copySource: entry,
-          copyIndex: index,
+          copyIndex: group.primaryIndex,
+          copySignature: group.id,
         },
       });
     },
@@ -177,15 +191,21 @@ export function AiProvidersPage() {
   );
 
   const duplicateCodexConfig = useCallback(
-    (index: number) => {
+    (signature: string) => {
+      const group = findProviderGroupBySignature(
+        groupProviderConfigs('codex', codexConfigs),
+        signature
+      );
+      if (!group) return;
       navigate('/ai-providers/codex/new', {
         state: {
           fromAiProviders: true,
-          copyIndex: index,
+          copyIndex: group.primaryIndex,
+          copySignature: group.id,
         },
       });
     },
-    [navigate]
+    [codexConfigs, navigate]
   );
 
   const duplicateOpenAIProvider = useCallback(
@@ -203,8 +223,11 @@ export function AiProvidersPage() {
     [navigate, openaiProviders]
   );
 
-  const deleteGemini = async (index: number) => {
-    const group = groupProviderConfigs('gemini', geminiKeys).find((item) => item.primaryIndex === index);
+  const deleteGemini = async (signature: string | number) => {
+    const group = findProviderGroupBySignature(
+      groupProviderConfigs('gemini', geminiKeys),
+      String(signature)
+    );
     if (!group) return;
     showConfirmation({
       title: t('ai_providers.gemini_delete_title', { defaultValue: 'Delete Gemini Key' }),
@@ -231,11 +254,14 @@ export function AiProvidersPage() {
 
   const setConfigEnabled = async (
     provider: 'gemini' | 'codex' | 'claude' | 'vertex' | 'openai',
-    index: number,
+    index: string | number,
     enabled: boolean
   ) => {
     if (provider === 'gemini') {
-      const group = groupProviderConfigs('gemini', geminiKeys).find((item) => item.primaryIndex === index);
+      const group = findProviderGroupBySignature(
+        groupProviderConfigs('gemini', geminiKeys),
+        String(index)
+      );
       if (!group) return;
       const switchingKey = `${provider}:${group.id}`;
       setConfigSwitchingKey(switchingKey);
@@ -270,7 +296,8 @@ export function AiProvidersPage() {
       return;
     }
     if (provider === 'openai') {
-      const current = openaiProviders[index];
+      const targetIndex = Number(index);
+      const current = openaiProviders[targetIndex];
       if (!current) return;
 
       const switchingKey = `${provider}:${current.name}`;
@@ -284,7 +311,7 @@ export function AiProvidersPage() {
           disabled: !enabled,
         })),
       };
-      const nextList = previousList.map((item, idx) => (idx === index ? nextItem : item));
+      const nextList = previousList.map((item, idx) => (idx === targetIndex ? nextItem : item));
 
       setOpenaiProviders(nextList);
       updateConfigValue('openai-compatibility', nextList);
@@ -309,7 +336,10 @@ export function AiProvidersPage() {
     }
 
     if (provider === 'claude') {
-      const group = groupProviderConfigs('claude', claudeConfigs).find((item) => item.primaryIndex === index);
+      const group = findProviderGroupBySignature(
+        groupProviderConfigs('claude', claudeConfigs),
+        String(index)
+      );
       if (!group) return;
       const switchingKey = `${provider}:${group.id}`;
       setConfigSwitchingKey(switchingKey);
@@ -342,7 +372,10 @@ export function AiProvidersPage() {
     }
 
     if (provider === 'codex') {
-      const group = groupProviderConfigs('codex', codexConfigs).find((item) => item.primaryIndex === index);
+      const group = findProviderGroupBySignature(
+        groupProviderConfigs('codex', codexConfigs),
+        String(index)
+      );
       if (!group) return;
       const switchingKey = `${provider}:${group.id}`;
       setConfigSwitchingKey(switchingKey);
@@ -374,7 +407,7 @@ export function AiProvidersPage() {
       return;
     }
 
-    const current = vertexConfigs[index];
+    const current = vertexConfigs[Number(index)];
     if (!current) return;
 
     const switchingKey = `${provider}:${current.apiKey}`;
@@ -391,7 +424,7 @@ export function AiProvidersPage() {
     try {
       await persistProviderConfigToggle({
         list: previousList,
-        index,
+        index: Number(index),
         enabled,
         save: providersApi.saveVertexConfigs,
         section: 'vertex-api-key',
@@ -411,11 +444,11 @@ export function AiProvidersPage() {
     }
   };
 
-  const deleteProviderEntry = async (type: 'codex' | 'claude', index: number) => {
+  const deleteProviderEntry = async (type: 'codex' | 'claude', index: string | number) => {
     const group =
       type === 'codex'
-        ? groupProviderConfigs('codex', codexConfigs).find((item) => item.primaryIndex === index)
-        : groupProviderConfigs('claude', claudeConfigs).find((item) => item.primaryIndex === index);
+        ? findProviderGroupBySignature(groupProviderConfigs('codex', codexConfigs), String(index))
+        : findProviderGroupBySignature(groupProviderConfigs('claude', claudeConfigs), String(index));
     if (!group) return;
     showConfirmation({
       title: t(`ai_providers.${type}_delete_title`, {
@@ -518,9 +551,18 @@ export function AiProvidersPage() {
             isSwitching={isSwitching}
             onAdd={() => openEditor('/ai-providers/gemini/new')}
             onDuplicate={duplicateGeminiConfig}
-            onEdit={(index) => openEditor(`/ai-providers/gemini/${index}`)}
+            onEdit={(signature) => {
+              const group = findProviderGroupBySignature(
+                groupProviderConfigs('gemini', geminiKeys),
+                String(signature)
+              );
+              if (!group) return;
+              openEditor(`/ai-providers/gemini/${group.primaryIndex}`, {
+                groupSignature: group.id,
+              });
+            }}
             onDelete={deleteGemini}
-            onToggle={(index, enabled) => void setConfigEnabled('gemini', index, enabled)}
+            onToggle={(signature, enabled) => void setConfigEnabled('gemini', signature, enabled)}
           />
         </div>
 
@@ -534,9 +576,18 @@ export function AiProvidersPage() {
             isSwitching={isSwitching}
             onAdd={() => openEditor('/ai-providers/codex/new')}
             onDuplicate={duplicateCodexConfig}
-            onEdit={(index) => openEditor(`/ai-providers/codex/${index}`)}
-            onDelete={(index) => void deleteProviderEntry('codex', index)}
-            onToggle={(index, enabled) => void setConfigEnabled('codex', index, enabled)}
+            onEdit={(signature) => {
+              const group = findProviderGroupBySignature(
+                groupProviderConfigs('codex', codexConfigs),
+                String(signature)
+              );
+              if (!group) return;
+              openEditor(`/ai-providers/codex/${group.primaryIndex}`, {
+                groupSignature: group.id,
+              });
+            }}
+            onDelete={(signature) => void deleteProviderEntry('codex', signature)}
+            onToggle={(signature, enabled) => void setConfigEnabled('codex', signature, enabled)}
           />
         </div>
 
@@ -550,9 +601,18 @@ export function AiProvidersPage() {
             isSwitching={isSwitching}
             onAdd={() => openEditor('/ai-providers/claude/new')}
             onDuplicate={duplicateClaudeConfig}
-            onEdit={(index) => openEditor(`/ai-providers/claude/${index}`)}
-            onDelete={(index) => void deleteProviderEntry('claude', index)}
-            onToggle={(index, enabled) => void setConfigEnabled('claude', index, enabled)}
+            onEdit={(signature) => {
+              const group = findProviderGroupBySignature(
+                groupProviderConfigs('claude', claudeConfigs),
+                String(signature)
+              );
+              if (!group) return;
+              openEditor(`/ai-providers/claude/${group.primaryIndex}`, {
+                groupSignature: group.id,
+              });
+            }}
+            onDelete={(signature) => void deleteProviderEntry('claude', signature)}
+            onToggle={(signature, enabled) => void setConfigEnabled('claude', signature, enabled)}
           />
         </div>
 

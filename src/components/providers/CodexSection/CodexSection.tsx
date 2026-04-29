@@ -24,10 +24,10 @@ interface CodexSectionProps {
   disableControls: boolean;
   isSwitching: boolean;
   onAdd: () => void;
-  onDuplicate: (index: number) => void;
-  onEdit: (index: number) => void;
-  onDelete: (index: number) => void;
-  onToggle: (index: number, enabled: boolean) => void;
+  onDuplicate: (signature: string) => void;
+  onEdit: (signature: string) => void;
+  onDelete: (signature: string) => void;
+  onToggle: (signature: string, enabled: boolean) => void;
 }
 
 export function CodexSection({
@@ -65,7 +65,7 @@ export function CodexSection({
         items={groups}
         loading={loading}
         keyField={(item) => item.id}
-        getActionIndex={(item) => item.primaryIndex}
+        getActionIndex={(item) => item.id}
         listClassName={styles.providerTableList}
         rowClassName={styles.providerTableRow}
         metaClassName={styles.providerTableMeta}
@@ -73,15 +73,15 @@ export function CodexSection({
         actionButtonClassName={styles.providerActionButton}
         emptyTitle={t('ai_providers.codex_empty_title')}
         emptyDescription={t('ai_providers.codex_empty_desc')}
-        onEdit={onEdit}
-        onDelete={onDelete}
+        onEdit={(action) => onEdit(String(action))}
+        onDelete={(action) => onDelete(String(action))}
         actionsDisabled={actionsDisabled}
         getRowDisabled={(item) => !item.enabled}
         extraActionButtons={(item) => (
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => onDuplicate(item.primaryIndex)}
+            onClick={() => onDuplicate(item.id)}
             disabled={actionsDisabled}
             className={styles.providerActionButton}
           >
@@ -96,7 +96,7 @@ export function CodexSection({
               item.enabled ? styles.providerDisableButton : styles.providerEnableButton
             }`}
             disabled={actionsDisabled}
-            onClick={() => void onToggle(item.primaryIndex, !item.enabled)}
+            onClick={() => void onToggle(item.id, !item.enabled)}
           >
             {item.enabled ? '禁用' : '启用'}
           </Button>

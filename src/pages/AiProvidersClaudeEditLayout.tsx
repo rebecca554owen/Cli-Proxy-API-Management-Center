@@ -17,12 +17,13 @@ import {
   buildProviderGroupEditSignature,
   buildProviderGroupFormState,
   buildNextProviderList,
+  findProviderGroupBySignature,
   groupProviderConfigs,
+  type GroupedProviderLocationState,
   type ProviderGroupFormState,
 } from '@/components/providers';
 
-type LocationState = {
-  fromAiProviders?: boolean;
+type LocationState = GroupedProviderLocationState & {
   copyIndex?: number;
   updatedClaudeConfigs?: ProviderKeyConfig[];
 } | null;
@@ -98,16 +99,32 @@ export function AiProvidersClaudeEditLayout() {
   const [configs, setConfigs] = useState<ProviderKeyConfig[]>(() => config?.claudeApiKeys ?? []);
   const [loading, setLoading] = useState(() => !isCacheValid('claude-api-key'));
   const [saving, setSaving] = useState(false);
+  const requestedGroupSignature = useMemo(
+    () => String((location.state as LocationState)?.groupSignature ?? '').trim(),
+    [location.state]
+  );
+  const requestedCopySignature = useMemo(
+    () => String((location.state as LocationState)?.copySignature ?? '').trim(),
+    [location.state]
+  );
 
   const draftKey = useMemo(() => {
     if (invalidIndexParam) return `claude:invalid:${params.index ?? 'unknown'}`;
     const locationState = location.state as LocationState;
     if (editIndex === null && typeof locationState?.copyIndex === 'number') {
-      return `claude:new:copy:${locationState.copyIndex}:${location.key}`;
+      return `claude:new:copy:${requestedCopySignature || locationState.copyIndex}:${location.key}`;
     }
     if (editIndex === null) return 'claude:new';
-    return `claude:${editIndex}`;
-  }, [editIndex, invalidIndexParam, location.key, location.state, params.index]);
+    return `claude:${requestedGroupSignature || editIndex}`;
+  }, [
+    editIndex,
+    invalidIndexParam,
+    location.key,
+    location.state,
+    params.index,
+    requestedCopySignature,
+    requestedGroupSignature,
+  ]);
 
   const draft = useClaudeEditDraftStore((state) => state.drafts[draftKey]);
   const acquireDraft = useClaudeEditDraftStore((state) => state.acquireDraft);
@@ -159,8 +176,9 @@ export function AiProvidersClaudeEditLayout() {
     () =>
       editIndex === null
         ? undefined
-        : groupedConfigs.find((group) => group.indexes.includes(editIndex)),
-    [editIndex, groupedConfigs]
+        : findProviderGroupBySignature(groupedConfigs, requestedGroupSignature) ??
+          groupedConfigs.find((group) => group.indexes.includes(editIndex)),
+    [editIndex, groupedConfigs, requestedGroupSignature]
   );
 
   const invalidIndex = editIndex !== null && !initialGroup;
@@ -240,9 +258,9 @@ export function AiProvidersClaudeEditLayout() {
 
     const locationState = location.state as LocationState;
     if (editIndex === null && typeof locationState?.copyIndex === 'number') {
-      const copyGroup = groupedConfigs.find((group) =>
-        group.indexes.includes(locationState.copyIndex!)
-      );
+      const copyGroup =
+        findProviderGroupBySignature(groupedConfigs, requestedCopySignature) ??
+        groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!));
       if (copyGroup) {
         const copiedForm = buildProviderGroupFormState(copyGroup);
         copiedForm.keyEntries = copiedForm.keyEntries.map(() => ({
@@ -383,7 +401,8 @@ export function AiProvidersClaudeEditLayout() {
       const locationState = location.state as LocationState;
       const copyGroup =
         editIndex === null && typeof locationState?.copyIndex === 'number'
-          ? groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!))
+          ? findProviderGroupBySignature(groupedConfigs, requestedCopySignature) ??
+            groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!))
           : undefined;
 
       const nextList = buildNextProviderList(configs, payloads, {
@@ -429,6 +448,7 @@ export function AiProvidersClaudeEditLayout() {
     invalidIndexParam,
     location.state,
     navigate,
+    requestedCopySignature,
     resolvedLoading,
     saving,
     setDraftBaselineSignature,

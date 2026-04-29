@@ -79,8 +79,8 @@ export function OpenAISection({
           actionButtonClassName={styles.providerActionButton}
           emptyTitle={t('ai_providers.openai_empty_title')}
           emptyDescription={t('ai_providers.openai_empty_desc')}
-          onEdit={onEdit}
-          onDelete={onDelete}
+          onEdit={(action) => onEdit(Number(action))}
+          onDelete={(action) => onDelete(Number(action))}
           actionsDisabled={actionsDisabled}
           getRowDisabled={(item) => (item.apiKeyEntries?.length ?? 0) > 0 && item.apiKeyEntries!.every((entry) => entry.disabled)}
           extraActionButtons={(_, index) => (

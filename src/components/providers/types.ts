@@ -134,6 +134,12 @@ export interface ProviderConfigGroup<TConfig> {
   cloak?: ProviderKeyConfig['cloak'];
 }
 
+export interface GroupedProviderLocationState {
+  fromAiProviders?: boolean;
+  groupSignature?: string;
+  copySignature?: string;
+}
+
 export interface AmpcodeUpstreamApiKeyEntry {
   upstreamApiKey: string;
   clientApiKeysText: string;

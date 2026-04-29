@@ -10,6 +10,8 @@ import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell';
 import {
+  findProviderGroupBySignature,
+  type GroupedProviderLocationState,
   ProviderGroupEditForm,
   buildProviderGroupEditSignature,
   buildProviderConfigsFromGroupForm,
@@ -31,8 +33,7 @@ import type { ProviderGroupFormState } from '@/components/providers';
 import layoutStyles from './AiProvidersEditLayout.module.scss';
 import styles from './AiProvidersPage.module.scss';
 
-type LocationState = {
-  fromAiProviders?: boolean;
+type LocationState = GroupedProviderLocationState & {
   copyIndex?: number;
 } | null;
 
@@ -103,12 +104,21 @@ export function AiProvidersCodexEditPage() {
   const editIndex = useMemo(() => parseIndexParam(params.index), [params.index]);
   const invalidIndexParam = hasIndexParam && editIndex === null;
   const groupedConfigs = useMemo(() => groupProviderConfigs('codex', configs), [configs]);
+  const requestedGroupSignature = useMemo(
+    () => String((location.state as LocationState)?.groupSignature ?? '').trim(),
+    [location.state]
+  );
+  const requestedCopySignature = useMemo(
+    () => String((location.state as LocationState)?.copySignature ?? '').trim(),
+    [location.state]
+  );
   const initialGroup = useMemo(
     () =>
       editIndex === null
         ? undefined
-        : groupedConfigs.find((group) => group.indexes.includes(editIndex)),
-    [editIndex, groupedConfigs]
+        : findProviderGroupBySignature(groupedConfigs, requestedGroupSignature) ??
+          groupedConfigs.find((group) => group.indexes.includes(editIndex)),
+    [editIndex, groupedConfigs, requestedGroupSignature]
   );
   const invalidIndex = editIndex !== null && !initialGroup;
 
@@ -173,9 +183,9 @@ export function AiProvidersCodexEditPage() {
       return;
     }
     if (editIndex === null && typeof locationState?.copyIndex === 'number') {
-      const copyGroup = groupedConfigs.find((group) =>
-        group.indexes.includes(locationState.copyIndex!)
-      );
+      const copyGroup =
+        findProviderGroupBySignature(groupedConfigs, requestedCopySignature) ??
+        groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!));
       if (copyGroup) {
         const nextForm = buildProviderGroupFormState(copyGroup);
         nextForm.keyEntries = nextForm.keyEntries.map(() => ({
@@ -519,7 +529,8 @@ export function AiProvidersCodexEditPage() {
       const locationState = location.state as LocationState;
       const copyGroup =
         editIndex === null && typeof locationState?.copyIndex === 'number'
-          ? groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!))
+          ? findProviderGroupBySignature(groupedConfigs, requestedCopySignature) ??
+            groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!))
           : undefined;
 
       const nextList = buildNextProviderList(configs, payloads, {
@@ -562,6 +573,7 @@ export function AiProvidersCodexEditPage() {
     invalidIndexParam,
     loading,
     location.state,
+    requestedCopySignature,
     saving,
     showNotification,
     t,

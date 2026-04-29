@@ -78,8 +78,8 @@ export function VertexSection({
           actionButtonClassName={styles.providerActionButton}
           emptyTitle={t('ai_providers.vertex_empty_title')}
           emptyDescription={t('ai_providers.vertex_empty_desc')}
-          onEdit={onEdit}
-          onDelete={onDelete}
+          onEdit={(action) => onEdit(Number(action))}
+          onDelete={(action) => onDelete(Number(action))}
           actionsDisabled={actionsDisabled}
           getRowDisabled={(item) => hasDisableAllModelsRule(item.excludedModels)}
           renderExtraActions={(item, index) => (

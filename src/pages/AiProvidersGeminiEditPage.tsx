@@ -9,6 +9,8 @@ import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell';
 import {
+  findProviderGroupBySignature,
+  type GroupedProviderLocationState,
   ProviderGroupEditForm,
   buildGeminiConfigsFromGroupForm,
   buildNextProviderList,
@@ -29,13 +31,10 @@ import type { ProviderGroupFormState } from '@/components/providers';
 import layoutStyles from './AiProvidersEditLayout.module.scss';
 import styles from './AiProvidersPage.module.scss';
 
-type LocationState =
-  | {
-      fromAiProviders?: boolean;
-      copySource?: GeminiKeyConfig;
-      copyIndex?: number;
-    }
-  | null;
+type LocationState = (GroupedProviderLocationState & {
+  copySource?: GeminiKeyConfig;
+  copyIndex?: number;
+}) | null;
 
 const buildEmptyForm = (): ProviderGroupFormState => ({
   baseUrl: '',
@@ -114,9 +113,21 @@ export function AiProvidersGeminiEditPage() {
   const editIndex = useMemo(() => parseIndexParam(params.index), [params.index]);
   const invalidIndexParam = hasIndexParam && editIndex === null;
   const groupedConfigs = useMemo(() => groupProviderConfigs('gemini', configs), [configs]);
+  const requestedGroupSignature = useMemo(
+    () => String((location.state as LocationState)?.groupSignature ?? '').trim(),
+    [location.state]
+  );
+  const requestedCopySignature = useMemo(
+    () => String((location.state as LocationState)?.copySignature ?? '').trim(),
+    [location.state]
+  );
   const initialGroup = useMemo(
-    () => (editIndex === null ? undefined : groupedConfigs.find((group) => group.indexes.includes(editIndex))),
-    [editIndex, groupedConfigs]
+    () =>
+      editIndex === null
+        ? undefined
+        : findProviderGroupBySignature(groupedConfigs, requestedGroupSignature) ??
+          groupedConfigs.find((group) => group.indexes.includes(editIndex)),
+    [editIndex, groupedConfigs, requestedGroupSignature]
   );
   const invalidIndex = editIndex !== null && !initialGroup;
 
@@ -182,7 +193,9 @@ export function AiProvidersGeminiEditPage() {
     }
 
     if (editIndex === null && typeof locationState?.copyIndex === 'number') {
-      const copyGroup = groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!));
+      const copyGroup =
+        findProviderGroupBySignature(groupedConfigs, requestedCopySignature) ??
+        groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!));
       if (copyGroup) {
         const nextForm = normalizeGeminiGroupForm(buildProviderGroupFormState(copyGroup));
         nextForm.keyEntries = nextForm.keyEntries.map(() => ({
@@ -544,7 +557,8 @@ export function AiProvidersGeminiEditPage() {
       const locationState = location.state as LocationState;
       const copyGroup =
         editIndex === null && typeof locationState?.copyIndex === 'number'
-          ? groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!))
+          ? findProviderGroupBySignature(groupedConfigs, requestedCopySignature) ??
+            groupedConfigs.find((group) => group.indexes.includes(locationState.copyIndex!))
           : undefined;
 
       const nextList = buildNextProviderList(configs, payloads, {
@@ -584,6 +598,7 @@ export function AiProvidersGeminiEditPage() {
     invalidIndexParam,
     loading,
     location.state,
+    requestedCopySignature,
     saving,
     showNotification,
     t,

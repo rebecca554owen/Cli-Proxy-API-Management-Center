@@ -39,8 +39,88 @@ const normalizeGroupBaseUrl = (provider: GroupedProviderKind, value: string | un
 };
 const normalizeGroupPrefix = (value: string | undefined) => String(value ?? '').trim();
 
-const buildGroupKey = (provider: GroupedProviderKind, baseUrl?: string, prefix?: string) =>
-  `${provider}::${normalizeGroupBaseUrl(provider, baseUrl)}::${normalizeGroupPrefix(prefix)}`;
+const normalizeGroupHeaders = (headers?: Record<string, string>) => {
+  const normalized = buildHeaderObject(headers);
+  const folded = new Map<string, { key: string; value: string }>();
+
+  Object.entries(normalized).forEach(([key, value]) => {
+    const normalizedKey = key.toLowerCase();
+    folded.set(normalizedKey, { key: normalizedKey, value });
+  });
+
+  return Array.from(folded.values()).sort((left, right) =>
+    left.key.toLowerCase().localeCompare(right.key.toLowerCase())
+  );
+};
+
+const normalizeGroupModels = (models?: Array<{ name: string; alias?: string; priority?: number }>) =>
+  (models ?? [])
+    .map((model) => ({
+      name: String(model?.name ?? '').trim(),
+      alias: String(model?.alias ?? '').trim(),
+      priority: model?.priority,
+    }))
+    .filter((model) => model.name)
+    .sort((left, right) => {
+      const byName = left.name.toLowerCase().localeCompare(right.name.toLowerCase());
+      if (byName !== 0) return byName;
+      const byAlias = left.alias.toLowerCase().localeCompare(right.alias.toLowerCase());
+      if (byAlias !== 0) return byAlias;
+      return (left.priority ?? 0) - (right.priority ?? 0);
+    });
+
+const normalizeGroupExcludedModels = (models?: string[]) =>
+  Array.from(
+    new Set(
+      (models ?? [])
+        .map((model) => String(model ?? '').trim())
+        .filter(Boolean)
+    )
+  ).sort((left, right) => left.toLowerCase().localeCompare(right.toLowerCase()));
+
+const normalizeGroupCloak = (cloak: CloakConfig | undefined) => {
+  if (!cloak) return null;
+  return {
+    mode: String(cloak.mode ?? '').trim(),
+    strictMode: Boolean(cloak.strictMode),
+    sensitiveWords: Array.from(
+      new Set(
+        (cloak.sensitiveWords ?? [])
+          .map((word) => String(word ?? '').trim())
+          .filter(Boolean)
+      )
+    ).sort((left, right) => left.toLowerCase().localeCompare(right.toLowerCase())),
+  };
+};
+
+export const buildProviderGroupSignature = (
+  provider: GroupedProviderKind,
+  config: Pick<
+    ProviderKeyConfig | GeminiKeyConfig,
+    'baseUrl' | 'prefix' | 'headers' | 'priority' | 'models' | 'excludedModels'
+  > &
+    Partial<Pick<ProviderKeyConfig, 'websockets' | 'cloak'>>
+) =>
+  JSON.stringify({
+    provider,
+    baseUrl: normalizeGroupBaseUrl(provider, config.baseUrl),
+    prefix: normalizeGroupPrefix(config.prefix),
+    priority: config.priority ?? null,
+    headers: normalizeGroupHeaders(config.headers),
+    models: normalizeGroupModels(config.models),
+    excludedModels: normalizeGroupExcludedModels(config.excludedModels),
+    websockets: provider === 'codex' ? Boolean(config.websockets) : null,
+    cloak: provider === 'claude' ? normalizeGroupCloak(config.cloak) : null,
+  });
+
+export const findProviderGroupBySignature = <TConfig>(
+  groups: ProviderConfigGroup<TConfig>[],
+  signature: string | null | undefined
+) => {
+  const target = String(signature ?? '').trim();
+  if (!target) return undefined;
+  return groups.find((group) => group.id === target);
+};
 
 const toKeyEntryDraft = (
   apiKey: string | undefined,
@@ -103,7 +183,7 @@ export const groupProviderConfigs = (
   const groups = new Map<string, ProviderConfigGroup<ProviderKeyConfig | GeminiKeyConfig>>();
 
   configs.forEach((item, index) => {
-    const key = buildGroupKey(provider, item.baseUrl, item.prefix);
+    const key = buildProviderGroupSignature(provider, item);
     const existing = groups.get(key);
     if (existing) {
       existing.configs.push(item);
